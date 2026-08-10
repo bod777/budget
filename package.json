@@ -14,7 +14,8 @@
     "import": "tsx --env-file-if-exists=.env scripts/import-csv.ts",
     "set-password": "tsx scripts/set-password.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && npm --prefix web run typecheck",
-    "dev-seed": "tsx scripts/dev-seed.ts"
+    "dev-seed": "tsx scripts/dev-seed.ts",
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

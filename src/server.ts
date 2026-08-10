@@ -38,8 +38,9 @@ registerBudgetRoutes(app);
 registerRecurringRoutes(app);
 
 if (existsSync(webDist)) {
-  await app.register(fastifyStatic, { root: webDist, wildcard: false });
-  // SPA fallback: anything that is not an API route serves the shell.
+  await app.register(fastifyStatic, { root: webDist });
+  // SPA fallback: anything that is not an API route serves the shell. Static
+  // files are matched first, so hashed assets never reach this.
   app.setNotFoundHandler((request, reply) => {
     if (request.url.startsWith('/api/')) {
       return reply.code(404).send({ error: 'not found' });
