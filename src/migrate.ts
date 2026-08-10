@@ -6,7 +6,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pool } from '../src/db.ts';
+import { pool } from './db.ts';
 
 const dbDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'db');
 
