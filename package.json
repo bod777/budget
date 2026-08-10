@@ -15,7 +15,8 @@
     "set-password": "tsx scripts/set-password.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && npm run typecheck --workspace web",
     "dev-seed": "tsx scripts/dev-seed.ts",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "import:prod": "DATABASE_URL=$(./scripts/prod-db-url.sh) tsx scripts/import-csv.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
