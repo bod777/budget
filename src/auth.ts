@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { env } from './env.ts';
 import { query } from './db.ts';
 
-const COOKIE = 'budget_session';
+export const COOKIE = 'budget_session';
 const SESSION_DAYS = 60;
 
 declare module 'fastify' {
@@ -13,7 +13,7 @@ declare module 'fastify' {
   }
 }
 
-async function createSession(userAgent: string | undefined): Promise<string> {
+export async function createSession(userAgent: string | undefined): Promise<string> {
   const token = randomBytes(32).toString('hex');
   const expires = new Date(Date.now() + SESSION_DAYS * 86_400_000);
   await query(
@@ -21,6 +21,18 @@ async function createSession(userAgent: string | undefined): Promise<string> {
     [token, expires, userAgent ?? null],
   );
   return token;
+}
+
+/** Single place where the session cookie's flags are decided. */
+export function setSessionCookie(reply: FastifyReply, token: string) {
+  reply.setCookie(COOKIE, token, {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: env.isProduction,
+    maxAge: SESSION_DAYS * 86_400,
+    signed: false,
+  });
 }
 
 async function sessionValid(token: string): Promise<boolean> {
@@ -31,11 +43,12 @@ async function sessionValid(token: string): Promise<boolean> {
 }
 
 export function registerAuth(app: FastifyInstance) {
-  // In local development without a password hash there is nothing to protect
-  // against, and requiring a login every restart is pure friction.
-  const authDisabled = !env.passwordHash;
+  // In local development with no sign-in method configured at all there is
+  // nothing to protect against, and requiring a login every restart is pure
+  // friction. Configuring either method turns the gate back on.
+  const authDisabled = !env.passwordHash && !env.google.enabled;
   if (authDisabled) {
-    app.log.warn('APP_PASSWORD_HASH is empty — authentication is disabled (dev only)');
+    app.log.warn('No APP_PASSWORD_HASH or Google config — authentication is disabled (dev only)');
   }
 
   app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -44,6 +57,8 @@ export function registerAuth(app: FastifyInstance) {
     const isPublic =
       url === '/api/session' ||
       url === '/api/health' ||
+      // The OAuth handshake necessarily happens before there is a session.
+      url.startsWith('/api/auth/') ||
       !isApi; // static assets and the SPA shell handle their own gating
 
     if (isPublic || authDisabled) {
@@ -60,10 +75,14 @@ export function registerAuth(app: FastifyInstance) {
   });
 
   app.get('/api/session', async (request) => {
-    if (authDisabled) return { authenticated: true, authDisabled: true };
+    const methods = {
+      password: Boolean(env.passwordHash),
+      google: env.google.enabled,
+    };
+    if (authDisabled) return { authenticated: true, authDisabled: true, methods };
     const token = request.cookies[COOKIE];
     const authenticated = Boolean(token && (await sessionValid(token)));
-    return { authenticated, authDisabled: false };
+    return { authenticated, authDisabled: false, methods };
   });
 
   app.post<{ Body: { password?: string } }>(
@@ -75,6 +94,9 @@ export function registerAuth(app: FastifyInstance) {
     },
     async (request, reply) => {
       if (authDisabled) return { authenticated: true, authDisabled: true };
+      if (!env.passwordHash) {
+        return reply.code(400).send({ error: 'Password sign-in is not configured' });
+      }
 
       const password = request.body?.password ?? '';
       const ok = password !== '' && (await bcrypt.compare(password, env.passwordHash));
@@ -83,14 +105,7 @@ export function registerAuth(app: FastifyInstance) {
       }
 
       const token = await createSession(request.headers['user-agent']);
-      reply.setCookie(COOKIE, token, {
-        path: '/',
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: env.isProduction,
-        maxAge: SESSION_DAYS * 86_400,
-        signed: false,
-      });
+      setSessionCookie(reply, token);
       return { authenticated: true };
     },
   );

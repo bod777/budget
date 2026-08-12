@@ -182,7 +182,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  session: () => request<{ authenticated: boolean; authDisabled: boolean }>('/api/session'),
+  session: () =>
+    request<{
+      authenticated: boolean;
+      authDisabled: boolean;
+      methods: { password: boolean; google: boolean };
+    }>('/api/session'),
   logIn: (password: string) =>
     request<{ authenticated: boolean }>('/api/session', {
       method: 'POST',

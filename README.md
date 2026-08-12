@@ -137,10 +137,55 @@ railway variable set 'APP_PASSWORD_HASH=<the printed hash>' --service budget-app
 Existing sessions survive a password change; delete rows from `sessions` to
 force a sign-out everywhere.
 
+### Google sign-in
+
+Optional, and off until all three variables are set. Password sign-in stays
+available alongside it, so a misconfigured OAuth client cannot lock you out.
+
+**1. Create the OAuth client** at
+[console.cloud.google.com](https://console.cloud.google.com) → APIs & Services:
+
+- **OAuth consent screen** → **External**. Leave it in **Testing** and add your
+  own address as a test user; that avoids Google's verification review. The
+  usual Testing-mode drawback (refresh tokens expiring after 7 days) does not
+  apply here, because Google is used once at sign-in to mint a local session
+  and no Google token is retained.
+- **Credentials → Create credentials → OAuth client ID → Web application**.
+
+**2. Register both redirect URIs**, exactly:
+
+```
+https://<your-app>.up.railway.app/api/auth/google/callback
+http://localhost:3000/api/auth/google/callback
+```
+
+**3. Set the variables:**
+
+```sh
+railway variable set 'GOOGLE_CLIENT_ID=<client id>' --service budget-app
+railway variable set 'GOOGLE_CLIENT_SECRET=<client secret>' --service budget-app
+railway variable set 'ALLOWED_EMAIL=you@gmail.com' --service budget-app
+railway variable set 'PUBLIC_URL=https://<your-app>.up.railway.app' --service budget-app
+```
+
+`ALLOWED_EMAIL` is a comma-separated allow-list and is **not optional**. An
+OAuth client establishes who someone is; it says nothing about whether they may
+read this data. Without the list, the sign-in button would admit anyone with a
+Google account, so sign-in stays disabled until it is set.
+
+`PUBLIC_URL` fixes the redirect URI rather than deriving it from proxy headers,
+because Google matches it against the registered value character for character.
+
 ## Security notes
 
 - Single password, bcrypt-hashed, checked against a rate-limited endpoint
   (8 attempts per 10 minutes).
+- Google sign-in uses the authorisation-code flow with PKCE. `state` is bound
+  to a short-lived signed, httpOnly cookie so a callback the user did not
+  initiate cannot be replayed at them, and the verified email is checked
+  against `ALLOWED_EMAIL` before any session is created. ID token claims
+  (issuer, audience, expiry, `email_verified`) are validated in
+  `src/lib/google-claims.ts`, which is directly covered by tests.
 - Session tokens are random 32-byte values stored server-side, sent as
   `httpOnly` + `secure` + `SameSite=Lax` cookies, expiring after 60 days.
 - Every `/api/*` route except `/api/health` and `/api/session` requires a

@@ -7,6 +7,7 @@ import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import { env } from './env.ts';
 import { registerAuth } from './auth.ts';
+import { registerGoogleAuthRoutes } from './routes/google-auth.ts';
 import { registerReferenceRoutes } from './routes/reference.ts';
 import { registerEntryRoutes } from './routes/entries.ts';
 import { registerSuggestRoutes } from './routes/suggest.ts';
@@ -31,6 +32,7 @@ await app.register(cookie, { secret: env.sessionSecret });
 await app.register(rateLimit, { global: false, max: 300, timeWindow: '1 minute' });
 
 registerAuth(app);
+registerGoogleAuthRoutes(app);
 registerReferenceRoutes(app);
 registerEntryRoutes(app);
 registerSuggestRoutes(app);

@@ -345,6 +345,34 @@ button:focus-visible {
   color: #fff;
 }
 
+/* Rendered as an <a> so it performs a real navigation to the OAuth endpoint. */
+.btn.google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-decoration: none;
+  background: #ffffff;
+  color: #1f1f1f;
+  border: 1px solid #dadce0;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
 /* ---- banners ---- */
 
 .banner {
