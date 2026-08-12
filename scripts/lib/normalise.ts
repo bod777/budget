@@ -32,6 +32,10 @@ export const COUNTERPARTY_ALIASES: Record<string, string> = {
   anthropic: 'Anthropic',
   'pat muprhy': 'Pat Murphy',
   'pat murphy': 'Pat Murphy',
+  // normaliseKey turns punctuation into a space, so "Conn's Camera" keys as
+  // "conn s camera", not "conns camera". Both spacings appear in the data.
+  'conn s camera': "Conn's Camera",
+  'conn s cameras': "Conn's Camera",
   'conns camera': "Conn's Camera",
   'conns cameras': "Conn's Camera",
   'corners pharmacy': 'Corners Pharmacy',
@@ -40,6 +44,8 @@ export const COUNTERPARTY_ALIASES: Record<string, string> = {
   'just eat': 'Just Eat',
   'm s': 'Marks & Spencer',
   'marks spencer': 'Marks & Spencer',
+  'marks spencers': 'Marks & Spencer',
+  'marks spencer s': 'Marks & Spencer',
   qpark: 'Q Park',
   'q park': 'Q Park',
   'maxol station main street': 'Maxol Main Street',
@@ -59,6 +65,9 @@ export const COUNTERPARTY_ALIASES: Record<string, string> = {
   'tom walsh': 'Tom Walsh',
   'acme insurance': 'Acme Insurance',
   'acme insurance': 'Acme Insurance',
+  // Too short for the fuzzy pass, and a letter insertion rather than a plural.
+  coasta: 'Costa',
+  costa: 'Costa',
   'chrisopher': 'Christopher',
 };
 
@@ -118,6 +127,28 @@ export function parseAmount(raw: string): number | null {
 /** Title-cases a name while leaving existing internal capitals alone. */
 function tidyDisplayName(raw: string): string {
   return raw.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Ranks two equally common spellings of the same payee.
+ *
+ * Frequency decides first, but plenty of variants appear exactly once each,
+ * and falling back to alphabetical order picks the typo about half the time
+ * ("Circle K Grafton Steet" sorts before "...Street"). Capitalisation is the
+ * better signal: a name typed deliberately capitalises each word, whereas a
+ * hurried one does not. Length breaks the remaining ties, on the grounds that
+ * dropped letters are the most common phone-keyboard slip.
+ */
+function spellingQuality(name: string): number {
+  const words = name.split(' ').filter((word) => /[a-z]/i.test(word));
+  if (words.length === 0) return 0;
+  return words.every((word) => /^[^a-zA-Z]*[A-Z]/.test(word)) ? 1 : 0;
+}
+
+function preferredSpelling(a: string, b: string): number {
+  return (
+    spellingQuality(b) - spellingQuality(a) || b.length - a.length || a.localeCompare(b)
+  );
 }
 
 export interface CanonicalNames {
@@ -182,7 +213,7 @@ export function buildCanonicalNames(raw: Iterable<string>): CanonicalNames {
       continue;
     }
     const best = [...bucket.display.entries()].sort(
-      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+      (a, b) => b[1] - a[1] || preferredSpelling(a[0], b[0]),
     )[0]!;
     canonical.set(key, best[0]);
   }
@@ -191,7 +222,9 @@ export function buildCanonicalNames(raw: Iterable<string>): CanonicalNames {
   // of the pair. Thresholds are deliberately tight -- "Aldi"/"Lidl" and
   // "Mary Egan"/"Mary Crean" must never collapse.
   const keys = [...counts.keys()].sort(
-    (a, b) => counts.get(b)!.total - counts.get(a)!.total || a.localeCompare(b),
+    (a, b) =>
+      counts.get(b)!.total - counts.get(a)!.total ||
+      preferredSpelling(canonical.get(a)!, canonical.get(b)!),
   );
   const absorbed = new Set<string>();
 
@@ -205,12 +238,23 @@ export function buildCanonicalNames(raw: Iterable<string>): CanonicalNames {
       if (absorbed.has(candidate)) continue;
       if (COUNTERPARTY_ALIASES[candidate]) continue;
 
-      const len = Math.max(target.length, candidate.length);
-      if (len < 8) continue;
-      const threshold = len >= 14 ? 2 : 1;
-      if (editDistance(target, candidate, threshold) > threshold) continue;
       // Never merge names that differ by a digit -- "Card 1"/"Card 2".
       if (/\d/.test(target) || /\d/.test(candidate)) continue;
+
+      // A trailing "s" is a slip, not a different shop ("Tesco"/"Tescos",
+      // "Eason"/"Easons"). Safe below the general length floor because it is an
+      // appended character rather than a substitution -- "Aldi"/"Aldo" and
+      // "Lush"/"Luas" cannot match this way.
+      const shorter = Math.min(target.length, candidate.length);
+      const pluralSlip =
+        shorter >= 4 && (target === `${candidate}s` || candidate === `${target}s`);
+
+      if (!pluralSlip) {
+        const len = Math.max(target.length, candidate.length);
+        if (len < 8) continue;
+        const threshold = len >= 14 ? 2 : 1;
+        if (editDistance(target, candidate, threshold) > threshold) continue;
+      }
 
       const to = canonical.get(target)!;
       absorbed.add(candidate);

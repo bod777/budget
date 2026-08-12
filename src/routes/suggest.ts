@@ -17,7 +17,12 @@ const TEMPLATE_SQL = `
       lower(regexp_replace(btrim(e.description), '\\s+', ' ', 'g')) as desc_key,
       e.counterparty_id,
       e.category_id,
-      e.channel_id,
+      -- Channel is deliberately not a grouping key. Paying for the same weekly
+      -- shop on a different card does not make it a different habit, and
+      -- grouping by it splits one entry into several near-identical
+      -- suggestions that crowd out genuinely different ones. The most recent
+      -- channel is offered instead, and is trivially changed at entry.
+      (array_agg(e.channel_id order by e.occurred_on desc, e.id desc))[1] as channel_id,
       count(*)::int as uses,
       max(e.occurred_on) as last_used,
       (array_agg(e.description order by e.occurred_on desc, e.id desc))[1] as description,
@@ -28,7 +33,7 @@ const TEMPLATE_SQL = `
     from entries e
     where e.kind = $1
       and e.occurred_on >= current_date - $2::int
-    group by 1, 2, 3, 4
+    group by 1, 2, 3
   )
   select
     g.description,

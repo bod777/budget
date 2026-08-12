@@ -36,6 +36,7 @@ interface StagedEntry {
   amount: number;
   category: string;
   channel: string | null;
+  note: string | null;
   loggedAt: string;
   sourceRow: number;
 }
@@ -67,14 +68,25 @@ function stage(
       return;
     }
 
-    const amount = parseAmount(pick(row, 'Amount'));
-    if (amount === null) {
-      problems.push(`${label}: unparseable amount ${JSON.stringify(pick(row, 'Amount'))} — skipped`);
-      return;
-    }
-    if (amount < 0) {
-      problems.push(`${label}: negative amount ${amount} — skipped`);
-      return;
+    // An unparseable amount means the original form response is wrong (a
+    // channel typed into the amount box, say). Dropping the row would hide the
+    // mistake; importing it at zero with a note surfaces it in the app where
+    // it can be corrected, and contributes nothing to any total meanwhile.
+    const rawAmount = pick(row, 'Amount');
+    const parsedAmount = parseAmount(rawAmount);
+    let amount = parsedAmount;
+    let note: string | null = null;
+
+    if (parsedAmount === null) {
+      amount = 0;
+      note = `Amount missing in the original form response (the Amount field contained ${JSON.stringify(rawAmount)}). Needs correcting.`;
+      problems.push(
+        `${label}: unparseable amount ${JSON.stringify(rawAmount)} — imported as 0 and flagged`,
+      );
+    } else if (parsedAmount < 0) {
+      amount = Math.abs(parsedAmount);
+      note = `Recorded as a negative amount (${parsedAmount}) in the original form response.`;
+      problems.push(`${label}: negative amount ${parsedAmount} — imported as ${amount} and flagged`);
     }
 
     const category = pick(row, 'Category');
@@ -95,9 +107,10 @@ function stage(
       occurredOn,
       description: description || '(no description)',
       counterparty,
-      amount,
+      amount: amount ?? 0,
       category,
       channel,
+      note,
       loggedAt,
       sourceRow: lineNo,
     });
@@ -203,7 +216,7 @@ async function main() {
     `- Rows imported: **${entries.length}**`,
     `- Exact duplicates dropped: **${staged.length - entries.length}**`,
     `- Payee spellings merged: **${uniqueMerges.length}**`,
-    `- Rows skipped as unparseable: **${problems.length}**`,
+    `- Rows flagged for review: **${problems.length}**`,
     '',
     '## Payee spellings merged',
     '',
@@ -215,7 +228,7 @@ async function main() {
     '',
     notes.length ? notes.map((n) => `- ${n}`).join('\n') : '_none_',
     '',
-    '## Skipped rows',
+    '## Flagged for review',
     '',
     problems.length ? problems.map((p) => `- ${p}`).join('\n') : '_none_',
     '',
@@ -283,8 +296,8 @@ async function main() {
       await client.query(
         `insert into entries
            (kind, occurred_on, description, counterparty_id, amount,
-            category_id, channel_id, source, logged_at)
-         values ($1, $2, $3, $4, $5, $6, $7, 'import', $8)`,
+            category_id, channel_id, source, logged_at, note)
+         values ($1, $2, $3, $4, $5, $6, $7, 'import', $8, $9)`,
         [
           entry.kind,
           entry.occurredOn,
@@ -294,6 +307,7 @@ async function main() {
           categoryId,
           channelId,
           entry.loggedAt,
+          entry.note,
         ],
       );
       inserted += 1;

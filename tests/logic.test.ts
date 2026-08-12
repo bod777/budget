@@ -119,6 +119,66 @@ test('distinct payees are never merged by the fuzzy pass', () => {
   assert.equal(canonical.get('mary crean'), 'Mary Crean');
 });
 
+test('a one-off typo does not become the canonical spelling', () => {
+  // Each spelling appears once, so frequency cannot decide. Alphabetical order
+  // would pick the typo in both of these.
+  const { canonical } = buildCanonicalNames([
+    'Circle K Grafton Street',
+    'Circle K Grafton Steet',
+    'The Lighthouse',
+    'The Lighthous',
+    "Conn's Cameras",
+    "Conn's camera",
+  ]);
+  assert.equal(canonical.get('circle k grafton street'), 'Circle K Grafton Street');
+  assert.equal(canonical.get('circle k grafton steet'), 'Circle K Grafton Street');
+  assert.equal(canonical.get('the lighthouse'), 'The Lighthouse');
+  assert.equal(canonical.get('the lighthous'), 'The Lighthouse');
+  // Conn's is in the explicit alias table; apostrophes key as a space.
+  assert.equal(canonical.get('conn s cameras'), "Conn's Camera");
+  assert.equal(canonical.get('conn s camera'), "Conn's Camera");
+});
+
+test('a stray plural merges, but a one-letter substitution never does', () => {
+  const { canonical } = buildCanonicalNames([
+    ...Array(55).fill('Tesco'),
+    ...Array(4).fill('Tescos'),
+    ...Array(8).fill('Easons'),
+    ...Array(3).fill('Eason'),
+    // Genuinely different businesses that differ by one letter.
+    'Aldi',
+    'Aldo',
+    'Lush',
+    'Luas',
+  ]);
+  assert.equal(canonical.get('tesco'), 'Tesco');
+  assert.equal(canonical.get('tescos'), 'Tesco');
+  assert.equal(canonical.get('easons'), 'Easons');
+  assert.equal(canonical.get('eason'), 'Easons');
+  assert.equal(canonical.get('aldi'), 'Aldi');
+  assert.equal(canonical.get('aldo'), 'Aldo');
+  assert.equal(canonical.get('lush'), 'Lush');
+  assert.equal(canonical.get('luas'), 'Luas');
+});
+
+test('capitalisation outranks length when picking a spelling', () => {
+  const { canonical } = buildCanonicalNames(['Aircoach', 'Air coach']);
+  assert.equal(canonical.get('aircoach'), 'Aircoach');
+  assert.equal(canonical.get('air coach'), 'Aircoach');
+});
+
+test('every Marks & Spencer variant lands on one name', () => {
+  const { canonical } = buildCanonicalNames([
+    'M&S',
+    'Marks & Spencer',
+    'Marks & Spencers',
+    "Marks & Spencer's",
+  ]);
+  for (const key of ['m s', 'marks spencer', 'marks spencers', 'marks spencer s']) {
+    assert.equal(canonical.get(key), 'Marks & Spencer');
+  }
+});
+
 test('trailing whitespace alone does not create a second payee', () => {
   const { canonical } = buildCanonicalNames(['Acme Insurance', 'Acme Insurance ', '48 Mobile ']);
   assert.equal(canonical.get('acme insurance'), 'Acme Insurance');
