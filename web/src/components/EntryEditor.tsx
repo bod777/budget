@@ -20,8 +20,10 @@ export function EntryEditor({ entry, reference, onClose, onSaved, onDeleted }: P
   const [counterparty, setCounterparty] = useState(entry.counterparty ?? '');
   const [amount, setAmount] = useState(String(entry.amount));
   const [categoryId, setCategoryId] = useState(entry.categoryId);
-  const [channelId, setChannelId] = useState<number | null>(entry.channelId);
+  const [accountId, setAccountId] = useState<number | null>(entry.accountId);
+  const [toAccountId, setToAccountId] = useState<number | null>(entry.toAccountId);
   const [note, setNote] = useState(entry.note ?? '');
+  const isTransfer = entry.kind === 'transfer';
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -30,9 +32,9 @@ export function EntryEditor({ entry, reference, onClose, onSaved, onDeleted }: P
     () => reference.categories.filter((c) => c.kind === entry.kind),
     [reference.categories, entry.kind],
   );
-  const channels = useMemo(
-    () => reference.channels.filter((c) => c.kinds.includes(entry.kind)),
-    [reference.channels, entry.kind],
+  const accounts = useMemo(
+    () => reference.accounts.filter((c) => entry.kind === 'transfer' || c.usableFor.includes(entry.kind)),
+    [reference.accounts, entry.kind],
   );
 
   useEffect(() => {
@@ -50,7 +52,10 @@ export function EntryEditor({ entry, reference, onClose, onSaved, onDeleted }: P
   }, [onClose]);
 
   const valid =
-    description.trim() !== '' && Number.isFinite(Number(amount)) && Number(amount) >= 0;
+    description.trim() !== '' &&
+    Number.isFinite(Number(amount)) &&
+    Number(amount) >= 0 &&
+    (!isTransfer || (accountId !== null && toAccountId !== null && accountId !== toAccountId));
 
   const changed =
     occurredOn !== entry.occurredOn ||
@@ -58,7 +63,8 @@ export function EntryEditor({ entry, reference, onClose, onSaved, onDeleted }: P
     counterparty !== (entry.counterparty ?? '') ||
     Number(amount) !== entry.amount ||
     categoryId !== entry.categoryId ||
-    channelId !== entry.channelId ||
+    accountId !== entry.accountId ||
+    toAccountId !== entry.toAccountId ||
     note !== (entry.note ?? '');
 
   async function save() {
@@ -70,10 +76,11 @@ export function EntryEditor({ entry, reference, onClose, onSaved, onDeleted }: P
         kind: entry.kind,
         occurredOn,
         description: description.trim(),
-        counterparty: counterparty.trim() || null,
+        counterparty: isTransfer ? null : counterparty.trim() || null,
         amount: Number(amount),
-        categoryId,
-        channelId,
+        categoryId: isTransfer ? null : categoryId,
+        accountId,
+        toAccountId: isTransfer ? toAccountId : null,
         note: note.trim() || null,
       });
       onSaved();
@@ -138,6 +145,7 @@ export function EntryEditor({ entry, reference, onClose, onSaved, onDeleted }: P
             />
           </div>
 
+          {!isTransfer && (
           <div className="field">
             <label htmlFor="edit-payee">{entry.kind === 'expense' ? 'Payee' : 'Payer'}</label>
             <input
@@ -148,6 +156,7 @@ export function EntryEditor({ entry, reference, onClose, onSaved, onDeleted }: P
               onChange={(event) => setCounterparty(event.target.value)}
             />
           </div>
+          )}
 
           <div className="field">
             <label htmlFor="edit-amount">Amount</label>
@@ -161,6 +170,7 @@ export function EntryEditor({ entry, reference, onClose, onSaved, onDeleted }: P
             />
           </div>
 
+          {!isTransfer && (
           <div className="field">
             <label>Category</label>
             <div className="chips">
@@ -177,23 +187,47 @@ export function EntryEditor({ entry, reference, onClose, onSaved, onDeleted }: P
               ))}
             </div>
           </div>
+          )}
 
           <div className="field">
-            <label>Channel</label>
+            <label>{isTransfer ? 'From' : 'Account'}</label>
             <div className="chips">
-              {channels.map((channel) => (
+              {accounts.map((account) => (
                 <button
-                  key={channel.id}
+                  key={account.id}
                   type="button"
                   className="chip selectable"
-                  aria-pressed={channelId === channel.id}
-                  onClick={() => setChannelId(channelId === channel.id ? null : channel.id)}
+                  aria-pressed={accountId === account.id}
+                  disabled={isTransfer && toAccountId === account.id}
+                  onClick={() =>
+                    setAccountId(accountId === account.id && !isTransfer ? null : account.id)
+                  }
                 >
-                  {channel.name}
+                  {account.name}
                 </button>
               ))}
             </div>
           </div>
+
+          {isTransfer && (
+            <div className="field">
+              <label>To</label>
+              <div className="chips">
+                {accounts.map((account) => (
+                  <button
+                    key={account.id}
+                    type="button"
+                    className="chip selectable"
+                    aria-pressed={toAccountId === account.id}
+                    disabled={accountId === account.id}
+                    onClick={() => setToAccountId(account.id)}
+                  >
+                    {account.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="field">
             <label htmlFor="edit-note">Note</label>

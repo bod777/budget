@@ -366,14 +366,26 @@ export function Dashboard({ reference, refreshKey }: Props) {
           <h2>Savings</h2>
           <div className="card">
             <table className="budget-table">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Target</th>
+                  <th>Moved</th>
+                  <th>Left</th>
+                </tr>
+              </thead>
               <tbody>
-                {view.savings.map((line) => (
-                  <tr key={line.id}>
-                    <td>{line.name}</td>
-                    <td className="num">{money(line.budget)}</td>
-                    <td className="num">{money(line.actual)}</td>
-                  </tr>
-                ))}
+                {view.savings.map((line) => {
+                  const left = Math.round((line.budget - line.actual) * 100) / 100;
+                  return (
+                    <tr key={line.accountId}>
+                      <td>{line.name}</td>
+                      <td className="num">{money(line.budget)}</td>
+                      <td className="num">{money(line.actual)}</td>
+                      <td className={`num ${left <= 0 ? 'pos' : 'neg'}`}>{money(left)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

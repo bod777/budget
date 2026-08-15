@@ -103,7 +103,7 @@ export function History({ reference, refreshKey, onChanged }: Props) {
                   <span className="desc">
                     {entry.description}
                     <div className="meta">
-                      {[entry.counterparty, entry.category, entry.channel]
+                      {[entry.counterparty, entry.category, entry.account]
                         .filter(Boolean)
                         .join(' · ')}
                       {entry.source === 'recurring' ? ' · auto' : ''}

@@ -79,6 +79,7 @@ export function registerBudgetRoutes(app: FastifyInstance) {
       `select category_id, sum(amount) as actual
        from entries
        where occurred_on >= $1::date and occurred_on < $2::date
+         and kind <> 'transfer'
        group by category_id`,
       [period.start, period.end],
     );
@@ -122,15 +123,27 @@ export function registerBudgetRoutes(app: FastifyInstance) {
     });
 
     const savings = await query<{
-      id: number;
+      accountId: number;
       name: string;
       budget: number;
       actual: number;
-      sort_order: number;
     }>(
-      `select id, name, budget, actual, sort_order
-       from savings_lines where month = $1::date order by sort_order, name`,
-      [start],
+      `select
+         a.id as "accountId",
+         a.name,
+         coalesce(t.amount, 0) as budget,
+         coalesce((
+           select sum(case when e.to_account_id = a.id then e.amount else -e.amount end)
+           from entries e
+           where e.kind = 'transfer'
+             and (e.to_account_id = a.id or e.account_id = a.id)
+             and e.occurred_on >= $2::date and e.occurred_on < $3::date
+         ), 0) as actual
+       from accounts a
+       left join savings_targets t on t.account_id = a.id and t.month = $1::date
+       where a.kind = 'savings' and a.archived = false
+       order by a.sort_order, a.name`,
+      [start, period.start, period.end],
     );
 
     const sum = (kind: 'expense' | 'income', field: 'budget' | 'actual') =>
@@ -211,6 +224,7 @@ export function registerBudgetRoutes(app: FastifyInstance) {
           `select c.kind, coalesce(sum(e.amount), 0) as total
            from entries e join categories c on c.id = e.category_id
            where e.occurred_on >= $1::date and e.occurred_on < $2::date
+             and e.kind <> 'transfer'
            group by c.kind`,
           [sourcePeriod.start, sourcePeriod.end],
         );
@@ -218,8 +232,15 @@ export function registerBudgetRoutes(app: FastifyInstance) {
         const priorExpense = Number(sums.rows.find((r) => r.kind === 'expense')?.total ?? 0);
 
         const priorSavings = await client.query<{ total: number }>(
-          'select coalesce(sum(actual), 0) as total from savings_lines where month = $1::date',
-          [sourceStart],
+          `select coalesce(sum(
+             case when e.to_account_id = a.id then e.amount else -e.amount end
+           ), 0) as total
+           from entries e
+           join accounts a on a.kind = 'savings'
+             and (e.to_account_id = a.id or e.account_id = a.id)
+           where e.kind = 'transfer'
+             and e.occurred_on >= $1::date and e.occurred_on < $2::date`,
+          [sourcePeriod.start, sourcePeriod.end],
         );
 
         const closing =
@@ -248,9 +269,9 @@ export function registerBudgetRoutes(app: FastifyInstance) {
         );
 
         await client.query(
-          `insert into savings_lines (month, name, budget, actual, sort_order)
-           select $1::date, name, budget, 0, sort_order from savings_lines where month = $2::date
-           on conflict (month, name) do nothing`,
+          `insert into savings_targets (month, account_id, amount)
+           select $1::date, account_id, amount from savings_targets where month = $2::date
+           on conflict (month, account_id) do nothing`,
           [start, sourceStart],
         );
       });
@@ -265,7 +286,7 @@ export function registerBudgetRoutes(app: FastifyInstance) {
       openingSurplus?: number;
       note?: string | null;
       lines?: { categoryId: number; amount: number; note?: string | null }[];
-      savings?: { name: string; budget: number; actual: number; sortOrder?: number }[];
+      savings?: { accountId: number; budget: number }[];
     };
   }>('/api/months/:month', async (request, reply) => {
     const month = request.params.month;
@@ -297,15 +318,13 @@ export function registerBudgetRoutes(app: FastifyInstance) {
         );
       }
 
-      if (body.savings) {
-        await client.query('delete from savings_lines where month = $1::date', [start]);
-        for (const [index, line] of body.savings.entries()) {
-          await client.query(
-            `insert into savings_lines (month, name, budget, actual, sort_order)
-             values ($1::date, $2, $3, $4, $5)`,
-            [start, line.name, line.budget, line.actual, line.sortOrder ?? index],
-          );
-        }
+      for (const line of body.savings ?? []) {
+        await client.query(
+          `insert into savings_targets (month, account_id, amount)
+           values ($1::date, $2, $3)
+           on conflict (month, account_id) do update set amount = excluded.amount`,
+          [start, line.accountId, line.budget],
+        );
       }
     });
 

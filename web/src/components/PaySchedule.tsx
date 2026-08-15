@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type PayRuleRow } from '../api.ts';
 import { SheetMirror } from './SheetMirror.tsx';
+import { Accounts } from './Accounts.tsx';
 
 interface Props {
   toast: (message: string) => void;
   onChanged: () => void;
+  reference: import('../api.ts').Reference;
+  refreshKey: number;
 }
 
 const DAY_OPTIONS: (number | 'last')[] = ['last', 28, 27, 26, 25, 15, 1];
@@ -45,7 +48,7 @@ function thisMonth(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
-export function PaySchedule({ toast, onChanged }: Props) {
+export function PaySchedule({ toast, onChanged, reference, refreshKey }: Props) {
   const [rules, setRules] = useState<PayRuleRow[]>([]);
   const [preview, setPreview] = useState<
     { month: string; start: string; end: string; isCurrent: boolean }[]
@@ -134,7 +137,10 @@ export function PaySchedule({ toast, onChanged }: Props) {
 
   return (
     <div>
-      <p className="small muted">
+      <h2>Accounts and balances</h2>
+      <Accounts reference={reference} refreshKey={refreshKey} toast={toast} />
+
+      <p className="small muted" style={{ marginTop: 24 }}>
         Budget periods run from one payday to the day before the next. A payday that lands on a
         weekend or an Irish bank holiday moves back to the previous working day.
       </p>

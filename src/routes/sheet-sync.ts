@@ -18,8 +18,10 @@ import { periodContaining, periodFor, shiftMonth, type PayRule } from '../lib/pa
 
 const EXPENSES_TAB = 'Expenses';
 const INCOME_TAB = 'Income';
+const TRANSFERS_TAB = 'Transfers';
+const BALANCES_TAB = 'Balances';
 const PERIODS_TAB = 'Periods';
-const TABS = [EXPENSES_TAB, INCOME_TAB, PERIODS_TAB];
+const TABS = [EXPENSES_TAB, INCOME_TAB, TRANSFERS_TAB, BALANCES_TAB, PERIODS_TAB];
 
 interface EntryRow {
   occurred_on: string;
@@ -28,7 +30,7 @@ interface EntryRow {
   amount: number;
   category: string;
   bucket: string | null;
-  channel: string | null;
+  account: string | null;
   note: string | null;
   source: string;
   logged_at: string;
@@ -66,12 +68,12 @@ function timestamp(value: unknown): string {
 export async function entryRows(kind: 'expense' | 'income', rules: PayRule[]): Promise<CellValue[][]> {
   const rows = await query<EntryRow>(
     `select e.occurred_on, e.description, cp.name as counterparty, e.amount,
-            cat.name as category, cat.bucket, ch.name as channel, e.note,
+            cat.name as category, cat.bucket, ch.name as account, e.note,
             e.source, e.logged_at
      from entries e
      left join counterparties cp on cp.id = e.counterparty_id
      join categories cat on cat.id = e.category_id
-     left join channels ch on ch.id = e.channel_id
+     left join accounts ch on ch.id = e.account_id
      where e.kind = $1
      order by e.occurred_on desc, e.id desc`,
     [kind],
@@ -84,7 +86,7 @@ export async function entryRows(kind: 'expense' | 'income', rules: PayRule[]): P
     'Amount',
     'Category',
     ...(kind === 'expense' ? (['Fixed/Variable'] as CellValue[]) : []),
-    'Channel',
+    'Account',
     // The whole point of mirroring rather than exporting: pivot by budget
     // period, which a date column alone cannot express.
     'Budget period',
@@ -102,7 +104,7 @@ export async function entryRows(kind: 'expense' | 'income', rules: PayRule[]): P
       Number(row.amount),
       row.category,
       ...(kind === 'expense' ? [row.bucket ?? ''] : []),
-      row.channel ?? '',
+      row.account ?? '',
       periodContaining(date, rules).month,
       row.note ?? '',
       row.source,
@@ -111,6 +113,99 @@ export async function entryRows(kind: 'expense' | 'income', rules: PayRule[]): P
   });
 
   return [header, ...body];
+}
+
+export async function transferRows(rules: PayRule[]): Promise<CellValue[][]> {
+  const rows = await query<{
+    occurred_on: string;
+    description: string;
+    amount: number;
+    from_name: string | null;
+    to_name: string | null;
+    note: string | null;
+    source: string;
+    logged_at: string;
+  }>(
+    `select e.occurred_on, e.description, e.amount,
+            src.name as from_name, dest.name as to_name,
+            e.note, e.source, e.logged_at
+     from entries e
+     left join accounts src on src.id = e.account_id
+     left join accounts dest on dest.id = e.to_account_id
+     where e.kind = 'transfer'
+     order by e.occurred_on desc, e.id desc`,
+  );
+
+  const header: CellValue[] = [
+    'Date', 'Description', 'From', 'To', 'Amount', 'Budget period', 'Note', 'Source', 'Logged at',
+  ];
+
+  return [
+    header,
+    ...rows.map((row): CellValue[] => {
+      const date = iso(row.occurred_on);
+      return [
+        date,
+        row.description,
+        row.from_name ?? '',
+        row.to_name ?? '',
+        Number(row.amount),
+        periodContaining(date, rules).month,
+        row.note ?? '',
+        row.source,
+        timestamp(row.logged_at),
+      ];
+    }),
+  ];
+}
+
+export async function balanceRows(): Promise<CellValue[][]> {
+  const rows = await query<{
+    name: string;
+    kind: string;
+    opening_balance: number | null;
+    opening_on: string | null;
+    movement: number;
+  }>(
+    `with movements as (
+       select e.account_id as account_id, e.occurred_on,
+              case e.kind when 'income' then e.amount
+                          when 'expense' then -e.amount
+                          when 'transfer' then -e.amount end as delta
+       from entries e where e.account_id is not null
+       union all
+       select e.to_account_id, e.occurred_on, e.amount
+       from entries e where e.kind = 'transfer' and e.to_account_id is not null
+     )
+     select a.name, a.kind, a.opening_balance, a.opening_on,
+            coalesce(sum(m.delta), 0) as movement
+     from accounts a
+     left join movements m on m.account_id = a.id
+       and (a.opening_on is null or m.occurred_on >= a.opening_on)
+     where a.archived = false
+     group by a.id
+     order by a.sort_order, a.name`,
+  );
+
+  const header: CellValue[] = [
+    'Account', 'Type', 'Opening balance', 'Opening date', 'Movement since', 'Balance',
+  ];
+
+  return [
+    header,
+    ...rows.map((row): CellValue[] => {
+      const opening = row.opening_balance === null ? null : Number(row.opening_balance);
+      return [
+        row.name,
+        row.kind,
+        opening,
+        row.opening_on ? iso(row.opening_on) : '',
+        Math.round(Number(row.movement) * 100) / 100,
+        // Left blank rather than guessed when no opening balance is known.
+        opening === null ? '' : Math.round((opening + Number(row.movement)) * 100) / 100,
+      ];
+    }),
+  ];
 }
 
 export async function periodRows(rules: PayRule[]): Promise<CellValue[][]> {
@@ -136,6 +231,7 @@ export async function periodRows(rules: PayRule[]): Promise<CellValue[][]> {
   const totals = await query<{ month_key: string; kind: string; total: number }>(
     `select to_char(occurred_on, 'YYYY-MM-DD') as month_key, c.kind, sum(e.amount) as total
      from entries e join categories c on c.id = e.category_id
+     where e.kind <> 'transfer'
      group by 1, 2`,
   );
 
@@ -149,10 +245,22 @@ export async function periodRows(rules: PayRule[]): Promise<CellValue[][]> {
     byPeriod.set(month, bucket);
   }
 
-  const savings = await query<{ month: string; total: number }>(
-    "select to_char(month, 'YYYY-MM') as month, coalesce(sum(actual), 0) as total from savings_lines group by 1",
+  // Savings moved in a period comes from real transfers into savings accounts,
+  // the same source the dashboard uses, so the two can never disagree.
+  const savingsMoves = await query<{ occurred_on: string; total: number }>(
+    `select e.occurred_on,
+            sum(case when e.to_account_id = a.id then e.amount else -e.amount end) as total
+     from entries e
+     join accounts a on a.kind = 'savings'
+       and (e.to_account_id = a.id or e.account_id = a.id)
+     where e.kind = 'transfer'
+     group by e.occurred_on`,
   );
-  const savingsByMonth = new Map(savings.map((r) => [r.month, Number(r.total)]));
+  const savingsByMonth = new Map<string, number>();
+  for (const row of savingsMoves) {
+    const month = periodContaining(iso(row.occurred_on), rules).month;
+    savingsByMonth.set(month, (savingsByMonth.get(month) ?? 0) + Number(row.total));
+  }
 
   const opening = await query<{ month: string; opening_surplus: number }>(
     "select to_char(month, 'YYYY-MM') as month, opening_surplus from budget_months",
@@ -195,27 +303,37 @@ export async function periodRows(rules: PayRule[]): Promise<CellValue[][]> {
   return [header, ...body];
 }
 
-export async function runSheetSync(): Promise<{ expenses: number; income: number; periods: number }> {
+export async function runSheetSync(): Promise<{
+  expenses: number;
+  income: number;
+  transfers: number;
+  periods: number;
+}> {
   const key = env.sheets.serviceAccount;
   const spreadsheetId = env.sheets.spreadsheetId;
   if (!key || !spreadsheetId) throw new Error('Google Sheets mirroring is not configured');
 
   const rules = await payRules();
-  const [expenses, income, periods] = await Promise.all([
+  const [expenses, income, transfers, balances, periods] = await Promise.all([
     entryRows('expense', rules),
     entryRows('income', rules),
+    transferRows(rules),
+    balanceRows(),
     periodRows(rules),
   ]);
 
   await ensureTabs(key, spreadsheetId, TABS);
   await replaceTab(key, spreadsheetId, EXPENSES_TAB, expenses);
   await replaceTab(key, spreadsheetId, INCOME_TAB, income);
+  await replaceTab(key, spreadsheetId, TRANSFERS_TAB, transfers);
+  await replaceTab(key, spreadsheetId, BALANCES_TAB, balances);
   await replaceTab(key, spreadsheetId, PERIODS_TAB, periods);
   await formatHeaders(key, spreadsheetId, TABS);
 
   const counts = {
     expenses: Math.max(expenses.length - 1, 0),
     income: Math.max(income.length - 1, 0),
+    transfers: Math.max(transfers.length - 1, 0),
     periods: Math.max(periods.length - 1, 0),
   };
 
@@ -223,7 +341,10 @@ export async function runSheetSync(): Promise<{ expenses: number; income: number
     `insert into sheet_sync (id, last_run_at, status, detail)
      values (1, now(), 'ok', $1)
      on conflict (id) do update set last_run_at = now(), status = 'ok', detail = $1`,
-    [`${counts.expenses} expenses, ${counts.income} income, ${counts.periods} periods`],
+    [
+      `${counts.expenses} expenses, ${counts.income} income, ` +
+        `${counts.transfers} transfers, ${counts.periods} periods`,
+    ],
   );
 
   return counts;

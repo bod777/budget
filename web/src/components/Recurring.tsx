@@ -84,7 +84,7 @@ export function Recurring({ reference, onChanged, toast }: Props) {
         counterparty: suggestion.counterparty,
         amount: suggestion.amount,
         categoryId: suggestion.categoryId,
-        channelId: suggestion.channelId,
+        accountId: suggestion.accountId,
         cadence: suggestion.cadence,
         anchorDate: suggestion.anchorDate,
       });

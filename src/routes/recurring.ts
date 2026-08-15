@@ -23,8 +23,9 @@ export async function generatePending(today = toIso(new Date())): Promise<number
     description: string;
     counterparty_id: number | null;
     amount: number | null;
-    category_id: number;
-    channel_id: number | null;
+    category_id: number | null;
+    account_id: number | null;
+    to_account_id: number | null;
     cadence: Cadence;
     anchor_date: string;
     last_generated_on: string | null;
@@ -54,8 +55,8 @@ export async function generatePending(today = toIso(new Date())): Promise<number
         const result = await client.query(
           `insert into pending_entries
              (recurring_rule_id, due_on, kind, description, counterparty_id,
-              amount, category_id, channel_id)
-           select $1, $2::date, $3, $4, $5, $6, $7, $8
+              amount, category_id, account_id, to_account_id)
+           select $1, $2::date, $3, $4, $5, $6, $7, $8, $9
            where not exists (
              select 1 from entries e
              where e.kind = $3
@@ -73,7 +74,8 @@ export async function generatePending(today = toIso(new Date())): Promise<number
             rule.counterparty_id,
             rule.amount,
             rule.category_id,
-            rule.channel_id,
+            rule.account_id,
+            rule.to_account_id,
           ],
         );
         if (result.rows.length > 0) created += 1;
@@ -93,13 +95,15 @@ export function registerRecurringRoutes(app: FastifyInstance) {
     const rules = await query(
       `select r.id, r.kind, r.description, r.counterparty_id as "counterpartyId",
               cp.name as counterparty, r.amount, r.category_id as "categoryId",
-              cat.name as category, r.channel_id as "channelId", ch.name as channel,
+              cat.name as category, r.account_id as "accountId", ch.name as account,
+              r.to_account_id as "toAccountId", dest.name as "toAccount",
               r.cadence, r.anchor_date as "anchorDate", r.active,
               r.last_generated_on as "lastGeneratedOn"
        from recurring_rules r
        left join counterparties cp on cp.id = r.counterparty_id
-       join categories cat on cat.id = r.category_id
-       left join channels ch on ch.id = r.channel_id
+       left join categories cat on cat.id = r.category_id
+       left join accounts ch on ch.id = r.account_id
+       left join accounts dest on dest.id = r.to_account_id
        order by r.active desc, r.cadence, r.description`,
     );
     return reply.send({ rules });
@@ -111,14 +115,16 @@ export function registerRecurringRoutes(app: FastifyInstance) {
       description?: string;
       counterparty?: string | null;
       amount?: number | null;
-      categoryId?: number;
-      channelId?: number | null;
+      categoryId?: number | null;
+      accountId?: number | null;
+      toAccountId?: number | null;
       cadence?: string;
       anchorDate?: string;
     };
   }>('/api/recurring', async (request, reply) => {
     const body = request.body ?? {};
-    const kind = body.kind === 'income' ? 'income' : 'expense';
+    const kind =
+      body.kind === 'income' ? 'income' : body.kind === 'transfer' ? 'transfer' : 'expense';
     const description = tidy(body.description ?? '');
     const cadence = CADENCES.includes(body.cadence as Cadence) ? (body.cadence as Cadence) : null;
     const anchorDate = (body.anchorDate ?? '').trim();
@@ -128,7 +134,14 @@ export function registerRecurringRoutes(app: FastifyInstance) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(anchorDate)) {
       return reply.code(400).send({ error: 'anchorDate must be YYYY-MM-DD' });
     }
-    if (!Number.isInteger(Number(body.categoryId))) {
+    if (kind === 'transfer') {
+      if (!Number.isInteger(Number(body.accountId)) || !Number.isInteger(Number(body.toAccountId))) {
+        return reply.code(400).send({ error: 'a transfer rule needs both accounts' });
+      }
+      if (Number(body.accountId) === Number(body.toAccountId)) {
+        return reply.code(400).send({ error: 'a transfer must be between two different accounts' });
+      }
+    } else if (!Number.isInteger(Number(body.categoryId))) {
       return reply.code(400).send({ error: 'categoryId is required' });
     }
 
@@ -136,17 +149,18 @@ export function registerRecurringRoutes(app: FastifyInstance) {
       const counterpartyId = await resolveCounterparty(client, body.counterparty);
       const result = await client.query<{ id: number }>(
         `insert into recurring_rules
-           (kind, description, counterparty_id, amount, category_id, channel_id,
-            cadence, anchor_date)
-         values ($1, $2, $3, $4, $5, $6, $7, $8)
+           (kind, description, counterparty_id, amount, category_id, account_id,
+            to_account_id, cadence, anchor_date)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          returning id`,
         [
           kind,
           description,
-          counterpartyId,
+          kind === 'transfer' ? null : counterpartyId,
           body.amount ?? null,
-          Number(body.categoryId),
-          body.channelId ?? null,
+          kind === 'transfer' ? null : Number(body.categoryId),
+          body.accountId ?? null,
+          kind === 'transfer' ? Number(body.toAccountId) : null,
           cadence,
           anchorDate,
         ],
@@ -193,12 +207,14 @@ export function registerRecurringRoutes(app: FastifyInstance) {
       `select p.id, p.due_on as "dueOn", p.kind, p.description,
               p.counterparty_id as "counterpartyId", cp.name as counterparty,
               p.amount, p.category_id as "categoryId", cat.name as category,
-              p.channel_id as "channelId", ch.name as channel,
+              p.account_id as "accountId", ch.name as account,
+              p.to_account_id as "toAccountId", dest.name as "toAccount",
               p.recurring_rule_id as "ruleId"
        from pending_entries p
        left join counterparties cp on cp.id = p.counterparty_id
-       join categories cat on cat.id = p.category_id
-       left join channels ch on ch.id = p.channel_id
+       left join categories cat on cat.id = p.category_id
+       left join accounts ch on ch.id = p.account_id
+       left join accounts dest on dest.id = p.to_account_id
        where p.status = 'pending'
        order by p.due_on asc, p.id asc`,
     );
@@ -219,8 +235,9 @@ export function registerRecurringRoutes(app: FastifyInstance) {
           description: string;
           counterparty_id: number | null;
           amount: number | null;
-          category_id: number;
-          channel_id: number | null;
+          category_id: number | null;
+          account_id: number | null;
+          to_account_id: number | null;
           recurring_rule_id: number;
           status: string;
         }>('select * from pending_entries where id = $1 for update', [id]);
@@ -237,8 +254,8 @@ export function registerRecurringRoutes(app: FastifyInstance) {
         const inserted = await client.query<{ id: number }>(
           `insert into entries
              (kind, occurred_on, description, counterparty_id, amount,
-              category_id, channel_id, source, recurring_rule_id)
-           values ($1, $2, $3, $4, $5, $6, $7, 'recurring', $8)
+              category_id, account_id, to_account_id, source, recurring_rule_id)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, 'recurring', $9)
            returning id`,
           [
             pending.kind,
@@ -247,7 +264,8 @@ export function registerRecurringRoutes(app: FastifyInstance) {
             pending.counterparty_id,
             amount,
             pending.category_id,
-            pending.channel_id,
+            pending.account_id,
+            pending.to_account_id,
             pending.recurring_rule_id,
           ],
         );
@@ -290,7 +308,7 @@ export function registerRecurringRoutes(app: FastifyInstance) {
       counterparty: string | null;
       category_id: number;
       category: string;
-      channel_id: number | null;
+      account_id: number | null;
       kind: 'expense' | 'income';
       dates: string[];
       amounts: number[];
@@ -298,15 +316,16 @@ export function registerRecurringRoutes(app: FastifyInstance) {
       `select
          (array_agg(e.description order by e.occurred_on desc))[1] as description,
          e.counterparty_id, cp.name as counterparty,
-         e.category_id, cat.name as category, e.channel_id, e.kind,
+         e.category_id, cat.name as category, e.account_id, e.kind,
          array_agg(e.occurred_on order by e.occurred_on) as dates,
          array_agg(e.amount order by e.occurred_on) as amounts
        from entries e
        left join counterparties cp on cp.id = e.counterparty_id
        join categories cat on cat.id = e.category_id
        where e.occurred_on >= current_date - 400
+         and e.kind <> 'transfer'
        group by lower(btrim(e.description)), e.counterparty_id, cp.name,
-                e.category_id, cat.name, e.channel_id, e.kind
+                e.category_id, cat.name, e.account_id, e.kind
        having count(*) >= 4`,
     );
 
@@ -355,7 +374,7 @@ export function registerRecurringRoutes(app: FastifyInstance) {
         counterparty: row.counterparty,
         categoryId: row.category_id,
         category: row.category,
-        channelId: row.channel_id,
+        accountId: row.account_id,
         cadence,
         anchorDate: toIso(new Date(dates[dates.length - 1]!)),
         amount: stable ? last : null,

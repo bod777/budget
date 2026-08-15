@@ -201,7 +201,14 @@ export function App() {
           </button>
         </div>
 
-        {settingsOpen && <PaySchedule toast={showToast} onChanged={refresh} />}
+        {settingsOpen && (
+          <PaySchedule
+            toast={showToast}
+            onChanged={refresh}
+            reference={reference}
+            refreshKey={refreshKey}
+          />
+        )}
 
         {!settingsOpen && tab === 'add' && (
           <>

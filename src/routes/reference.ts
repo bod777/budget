@@ -4,21 +4,21 @@ import { env } from '../env.ts';
 
 export function registerReferenceRoutes(app: FastifyInstance) {
   app.get('/api/reference', async (_request, reply) => {
-    const [categories, channels] = await Promise.all([
+    const [categories, accounts] = await Promise.all([
       query(
         `select id, kind, name, bucket, sort_order as "sortOrder"
          from categories where archived = false
          order by kind, sort_order, name`,
       ),
       query(
-        `select id, name, kinds, sort_order as "sortOrder"
-         from channels where archived = false
+        `select id, name, kind, usable_for as "usableFor", sort_order as "sortOrder"
+         from accounts where archived = false
          order by sort_order, name`,
       ),
     ]);
     return reply.send({
       categories,
-      channels,
+      accounts,
       currency: env.currency,
       locale: env.locale,
     });

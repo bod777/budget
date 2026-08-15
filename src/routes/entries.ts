@@ -10,7 +10,8 @@ interface EntryInput {
   counterparty?: string | null;
   amount?: number | string;
   categoryId?: number;
-  channelId?: number | null;
+  accountId?: number | null;
+  toAccountId?: number | null;
   note?: string | null;
   force?: boolean;
 }
@@ -20,28 +21,33 @@ const SELECT_ENTRY = `
     e.id, e.kind, e.occurred_on as "occurredOn", e.description,
     e.counterparty_id as "counterpartyId", cp.name as counterparty,
     e.amount, e.category_id as "categoryId", cat.name as category,
-    cat.bucket, e.channel_id as "channelId", ch.name as channel,
+    cat.bucket, e.account_id as "accountId", ch.name as account,
+    e.to_account_id as "toAccountId", dest.name as "toAccount",
     e.note, e.source, e.logged_at as "loggedAt"
   from entries e
   left join counterparties cp on cp.id = e.counterparty_id
-  join categories cat on cat.id = e.category_id
-  left join channels ch on ch.id = e.channel_id
+  left join categories cat on cat.id = e.category_id
+  left join accounts ch on ch.id = e.account_id
+  left join accounts dest on dest.id = e.to_account_id
 `;
 
 interface Validated {
-  kind: 'expense' | 'income';
+  kind: 'expense' | 'income' | 'transfer';
   occurredOn: string;
   description: string;
   counterparty: string | null;
   amount: number;
-  categoryId: number;
-  channelId: number | null;
+  categoryId: number | null;
+  accountId: number | null;
+  toAccountId: number | null;
   note: string | null;
 }
 
+const KINDS = new Set(['expense', 'income', 'transfer']);
+
 function validate(body: EntryInput): { ok: true; value: Validated } | { ok: false; error: string } {
-  const kind = body.kind === 'income' ? 'income' : body.kind === 'expense' ? 'expense' : null;
-  if (!kind) return { ok: false, error: 'kind must be "expense" or "income"' };
+  const kind = KINDS.has(body.kind ?? '') ? (body.kind as Validated['kind']) : null;
+  if (!kind) return { ok: false, error: 'kind must be "expense", "income" or "transfer"' };
 
   const occurredOn = (body.occurredOn ?? '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(occurredOn)) {
@@ -56,15 +62,33 @@ function validate(body: EntryInput): { ok: true; value: Validated } | { ok: fals
     return { ok: false, error: 'amount must be a non-negative number' };
   }
 
-  const categoryId = Number(body.categoryId);
-  if (!Number.isInteger(categoryId) || categoryId <= 0) {
-    return { ok: false, error: 'categoryId is required' };
+  const accountId =
+    body.accountId === null || body.accountId === undefined ? null : Number(body.accountId);
+  if (accountId !== null && !Number.isInteger(accountId)) {
+    return { ok: false, error: 'accountId must be an integer or null' };
   }
 
-  const channelId =
-    body.channelId === null || body.channelId === undefined ? null : Number(body.channelId);
-  if (channelId !== null && !Number.isInteger(channelId)) {
-    return { ok: false, error: 'channelId must be an integer or null' };
+  const toAccountId =
+    body.toAccountId === null || body.toAccountId === undefined ? null : Number(body.toAccountId);
+
+  // A transfer is a movement between two accounts and belongs to no spending
+  // category; anything else must be categorised and must not have a second end.
+  let categoryId: number | null = null;
+  if (kind === 'transfer') {
+    if (accountId === null || toAccountId === null) {
+      return { ok: false, error: 'a transfer needs both a from and a to account' };
+    }
+    if (accountId === toAccountId) {
+      return { ok: false, error: 'a transfer must be between two different accounts' };
+    }
+  } else {
+    if (toAccountId !== null) {
+      return { ok: false, error: 'only transfers have a destination account' };
+    }
+    categoryId = Number(body.categoryId);
+    if (!Number.isInteger(categoryId) || categoryId <= 0) {
+      return { ok: false, error: 'categoryId is required' };
+    }
   }
 
   return {
@@ -73,10 +97,11 @@ function validate(body: EntryInput): { ok: true; value: Validated } | { ok: fals
       kind,
       occurredOn,
       description,
-      counterparty: body.counterparty ? tidy(body.counterparty) : null,
+      counterparty: kind === 'transfer' ? null : body.counterparty ? tidy(body.counterparty) : null,
       amount: Math.round(amount * 100) / 100,
       categoryId,
-      channelId,
+      accountId,
+      toAccountId,
       note: body.note ? tidy(body.note) : null,
     },
   };
@@ -170,7 +195,7 @@ export function registerEntryRoutes(app: FastifyInstance) {
     const created = await withTransaction(async (client) => {
       const counterpartyId = await resolveCounterparty(client, value.counterparty);
 
-      if (!request.body.force) {
+      if (!request.body.force && value.kind !== 'transfer') {
         const dupes = await client.query(
           `${SELECT_ENTRY}
            where e.kind = $1
@@ -192,8 +217,8 @@ export function registerEntryRoutes(app: FastifyInstance) {
       const inserted = await client.query(
         `insert into entries
            (kind, occurred_on, description, counterparty_id, amount,
-            category_id, channel_id, note, source)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, 'manual')
+            category_id, account_id, to_account_id, note, source)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'manual')
          returning id`,
         [
           value.kind,
@@ -202,7 +227,8 @@ export function registerEntryRoutes(app: FastifyInstance) {
           counterpartyId,
           value.amount,
           value.categoryId,
-          value.channelId,
+          value.accountId,
+          value.toAccountId,
           value.note,
         ],
       );
@@ -243,8 +269,8 @@ export function registerEntryRoutes(app: FastifyInstance) {
         const result = await client.query(
           `update entries set
              kind = $2, occurred_on = $3, description = $4, counterparty_id = $5,
-             amount = $6, category_id = $7, channel_id = $8, note = $9,
-             updated_at = now()
+             amount = $6, category_id = $7, account_id = $8, to_account_id = $9,
+             note = $10, updated_at = now()
            where id = $1
            returning id`,
           [
@@ -255,7 +281,8 @@ export function registerEntryRoutes(app: FastifyInstance) {
             counterpartyId,
             value.amount,
             value.categoryId,
-            value.channelId,
+            value.accountId,
+            value.toAccountId,
             value.note,
           ],
         );

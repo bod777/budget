@@ -4,7 +4,7 @@ import { query } from '../db.ts';
 /**
  * Autocomplete is built from the shape of the history rather than a hand-kept
  * list of favourites: a "template" is a combination of description, payee,
- * category and channel that has been entered before. Picking one fills the
+ * category and account that has been entered before. Picking one fills the
  * whole form, which is the point -- the vast majority of entries are repeats
  * of something already logged.
  *
@@ -17,12 +17,12 @@ const TEMPLATE_SQL = `
       lower(regexp_replace(btrim(e.description), '\\s+', ' ', 'g')) as desc_key,
       e.counterparty_id,
       e.category_id,
-      -- Channel is deliberately not a grouping key. Paying for the same weekly
+      -- Account is deliberately not a grouping key. Paying for the same weekly
       -- shop on a different card does not make it a different habit, and
       -- grouping by it splits one entry into several near-identical
       -- suggestions that crowd out genuinely different ones. The most recent
-      -- channel is offered instead, and is trivially changed at entry.
-      (array_agg(e.channel_id order by e.occurred_on desc, e.id desc))[1] as channel_id,
+      -- account is offered instead, and is trivially changed at entry.
+      (array_agg(e.account_id order by e.occurred_on desc, e.id desc))[1] as account_id,
       count(*)::int as uses,
       max(e.occurred_on) as last_used,
       (array_agg(e.description order by e.occurred_on desc, e.id desc))[1] as description,
@@ -41,8 +41,8 @@ const TEMPLATE_SQL = `
     cp.name as counterparty,
     g.category_id,
     cat.name as category,
-    g.channel_id,
-    ch.name as channel,
+    g.account_id,
+    ch.name as account,
     g.uses,
     g.last_used,
     g.last_amount,
@@ -66,7 +66,7 @@ const TEMPLATE_SQL = `
   from grouped g
   left join counterparties cp on cp.id = g.counterparty_id
   join categories cat on cat.id = g.category_id
-  left join channels ch on ch.id = g.channel_id
+  left join accounts ch on ch.id = g.account_id
   where
     $3 = ''
     or g.desc_key like '%' || lower($3) || '%'
@@ -126,7 +126,7 @@ export function registerSuggestRoutes(app: FastifyInstance) {
            count(*)::int as uses,
            max(e.occurred_on) as last_used,
            (array_agg(e.category_id order by e.occurred_on desc, e.id desc))[1] as category_id,
-           (array_agg(e.channel_id order by e.occurred_on desc, e.id desc))[1] as channel_id
+           (array_agg(e.account_id order by e.occurred_on desc, e.id desc))[1] as account_id
          from entries e
          join counterparties cp on cp.id = e.counterparty_id
          where e.kind = $1

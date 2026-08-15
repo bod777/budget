@@ -9,6 +9,7 @@ import { env } from './env.ts';
 import { registerAuth } from './auth.ts';
 import { registerGoogleAuthRoutes } from './routes/google-auth.ts';
 import { registerReferenceRoutes } from './routes/reference.ts';
+import { registerAccountRoutes } from './routes/accounts.ts';
 import { registerEntryRoutes } from './routes/entries.ts';
 import { registerSuggestRoutes } from './routes/suggest.ts';
 import { registerBudgetRoutes } from './routes/budget.ts';
@@ -36,6 +37,7 @@ await app.register(rateLimit, { global: false, max: 300, timeWindow: '1 minute' 
 registerAuth(app);
 registerGoogleAuthRoutes(app);
 registerReferenceRoutes(app);
+registerAccountRoutes(app);
 registerEntryRoutes(app);
 registerSuggestRoutes(app);
 registerBudgetRoutes(app);

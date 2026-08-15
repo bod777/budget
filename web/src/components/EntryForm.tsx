@@ -8,6 +8,7 @@ import {
   type Entry,
   type Kind,
   type Reference,
+  type SpendKind,
   type Template,
 } from '../api.ts';
 import { Autocomplete } from './Autocomplete.tsx';
@@ -15,7 +16,7 @@ import { Autocomplete } from './Autocomplete.tsx';
 interface Props {
   reference: Reference;
   onSaved: () => void;
-  toast: (message: string, undo?: () => void) => void;
+  toast: (message: string, undo?: () => void | Promise<void>) => void;
 }
 
 interface Draft {
@@ -25,7 +26,8 @@ interface Draft {
   counterparty: string;
   amount: string;
   categoryId: number | null;
-  channelId: number | null;
+  accountId: number | null;
+  toAccountId: number | null;
 }
 
 function emptyDraft(kind: Kind, occurredOn: string): Draft {
@@ -36,9 +38,16 @@ function emptyDraft(kind: Kind, occurredOn: string): Draft {
     counterparty: '',
     amount: '',
     categoryId: null,
-    channelId: null,
+    accountId: null,
+    toAccountId: null,
   };
 }
+
+const KIND_LABEL: Record<Kind, string> = {
+  expense: 'Expense',
+  income: 'Income',
+  transfer: 'Transfer',
+};
 
 export function EntryForm({ reference, onSaved, toast }: Props) {
   const [draft, setDraft] = useState<Draft>(() => emptyDraft('expense', todayIso()));
@@ -54,27 +63,39 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
   const descriptionRef = useRef<HTMLInputElement>(null);
   const saveRef = useRef<HTMLButtonElement>(null);
 
+  const isTransfer = draft.kind === 'transfer';
+  const spendKind: SpendKind = draft.kind === 'income' ? 'income' : 'expense';
+
   const categories = useMemo(
-    () => reference.categories.filter((c) => c.kind === draft.kind),
-    [reference.categories, draft.kind],
+    () => reference.categories.filter((c) => c.kind === spendKind),
+    [reference.categories, spendKind],
   );
-  const channels = useMemo(
-    () => reference.channels.filter((c) => c.kinds.includes(draft.kind)),
-    [reference.channels, draft.kind],
+  // A transfer can involve any account; spending and income are limited to the
+  // accounts that make sense (no income onto a credit card, for instance).
+  const accounts = useMemo(
+    () =>
+      isTransfer
+        ? reference.accounts
+        : reference.accounts.filter((a) => a.usableFor.includes(spendKind)),
+    [reference.accounts, isTransfer, spendKind],
   );
 
   useEffect(() => {
+    if (isTransfer) {
+      setQuick([]);
+      return;
+    }
     api
-      .quick(draft.kind, 8)
+      .quick(spendKind, 8)
       .then((r) => setQuick(r.quick))
       .catch(() => setQuick([]));
-  }, [draft.kind, session.length]);
+  }, [spendKind, isTransfer, session.length]);
 
-  // Live duplicate check. Runs only once the entry is complete enough to be
-  // comparable, so it never fires mid-typing.
+  // Live duplicate check. Transfers between your own accounts are legitimately
+  // repetitive, so they are left out of it.
   useEffect(() => {
     const amount = Number(draft.amount);
-    if (!draft.description || !draft.amount || !Number.isFinite(amount) || amount <= 0) {
+    if (isTransfer || !draft.description || !draft.amount || !Number.isFinite(amount) || amount <= 0) {
       setDuplicates([]);
       return;
     }
@@ -108,6 +129,7 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
     draft.amount,
     draft.categoryId,
     categories,
+    isTransfer,
   ]);
 
   const applyTemplate = useCallback((template: Template) => {
@@ -116,7 +138,7 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
       description: template.description,
       counterparty: template.counterparty ?? '',
       categoryId: template.category_id,
-      channelId: template.channel_id,
+      accountId: template.account_id,
       amount: template.last_amount != null ? String(template.last_amount) : '',
     }));
 
@@ -134,21 +156,23 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
   }, []);
 
   const fetchTemplates = useCallback(
-    (query: string) => api.suggest(draft.kind, query, 8).then((r) => r.templates),
-    [draft.kind],
+    (query: string) => api.suggest(spendKind, query, 8).then((r) => r.templates),
+    [spendKind],
   );
 
   const fetchCounterparties = useCallback(
-    (query: string) =>
-      api.counterparties(draft.kind, query, 8).then((r) => r.counterparties),
-    [draft.kind],
+    (query: string) => api.counterparties(spendKind, query, 8).then((r) => r.counterparties),
+    [spendKind],
   );
 
+  const amountValue = Number(draft.amount);
   const valid =
     draft.description.trim() !== '' &&
-    draft.categoryId !== null &&
-    Number.isFinite(Number(draft.amount)) &&
-    Number(draft.amount) > 0;
+    Number.isFinite(amountValue) &&
+    amountValue > 0 &&
+    (isTransfer
+      ? draft.accountId !== null && draft.toAccountId !== null && draft.accountId !== draft.toAccountId
+      : draft.categoryId !== null);
 
   async function save(force = false) {
     if (!valid || saving) return;
@@ -159,19 +183,22 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
         kind: draft.kind,
         occurredOn: draft.occurredOn,
         description: draft.description.trim(),
-        counterparty: draft.counterparty.trim() || null,
-        amount: Number(draft.amount),
-        categoryId: draft.categoryId,
-        channelId: draft.channelId,
+        counterparty: isTransfer ? null : draft.counterparty.trim() || null,
+        amount: amountValue,
+        categoryId: isTransfer ? null : draft.categoryId,
+        accountId: draft.accountId,
+        toAccountId: isTransfer ? draft.toAccountId : null,
         force,
       });
 
       setSession((list) => [entry, ...list]);
-      // The date is deliberately kept: a batch is nearly always several
-      // entries from the same day or a short run of days.
+      // The date and the accounts are deliberately kept: a batch is nearly
+      // always several entries from the same day, and transfers repeat between
+      // the same pair of accounts.
       setDraft((current) => ({
         ...emptyDraft(current.kind, current.occurredOn),
-        channelId: current.channelId,
+        accountId: current.accountId,
+        toAccountId: current.kind === 'transfer' ? current.toAccountId : null,
       }));
       setDuplicates([]);
       onSaved();
@@ -198,19 +225,24 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
   return (
     <div>
       <div className="segmented" role="group" aria-label="Entry type">
-        {(['expense', 'income'] as Kind[]).map((kind) => (
+        {(['expense', 'income', 'transfer'] as Kind[]).map((kind) => (
           <button
             key={kind}
             type="button"
             aria-pressed={draft.kind === kind}
-            onClick={() =>
-              setDraft((current) => ({ ...emptyDraft(kind, current.occurredOn) }))
-            }
+            onClick={() => setDraft(() => emptyDraft(kind, draft.occurredOn))}
           >
-            {kind === 'expense' ? 'Expense' : 'Income'}
+            {KIND_LABEL[kind]}
           </button>
         ))}
       </div>
+
+      {isTransfer && (
+        <p className="small muted" style={{ marginTop: 10, marginBottom: 0 }}>
+          Moving your own money between accounts. It counts as neither spending nor income —
+          taking out cash, or paying into savings.
+        </p>
+      )}
 
       {quick.length > 0 && draft.description === '' && (
         <>
@@ -264,52 +296,69 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
           />
         </div>
 
-        <Autocomplete<Template>
-          label="Description"
-          value={draft.description}
-          onChange={(value) => setDraft((c) => ({ ...c, description: value }))}
-          onPick={applyTemplate}
-          fetchItems={fetchTemplates}
-          renderItem={(template) => (
-            <>
-              <span className="suggestion-main">
-                <span className="suggestion-title">{template.description}</span>
-                <span className="suggestion-meta">
-                  {[template.counterparty, template.category, template.channel]
-                    .filter(Boolean)
-                    .join(' · ')}
-                  {` · ${template.uses}×`}
-                </span>
-              </span>
-              <span className="suggestion-amount money">
-                {formatMoney(template.last_amount, reference.currency, reference.locale)}
-                {template.amount_varies && <span className="muted small">{' ~'}</span>}
-              </span>
-            </>
-          )}
-          keyOf={(t) => `${t.description}|${t.counterparty_id}|${t.category_id}|${t.channel_id}`}
-          placeholder="What was it?"
-          inputRef={descriptionRef}
-          autoFocus
-        />
+        {isTransfer ? (
+          <div className="field">
+            <label htmlFor="transfer-desc">Description</label>
+            <input
+              id="transfer-desc"
+              ref={descriptionRef}
+              type="text"
+              placeholder="e.g. Monthly saving, Cash out"
+              value={draft.description}
+              autoComplete="off"
+              onChange={(event) => setDraft((c) => ({ ...c, description: event.target.value }))}
+            />
+          </div>
+        ) : (
+          <>
+            <Autocomplete<Template>
+              label="Description"
+              value={draft.description}
+              onChange={(value) => setDraft((c) => ({ ...c, description: value }))}
+              onPick={applyTemplate}
+              fetchItems={fetchTemplates}
+              renderItem={(template) => (
+                <>
+                  <span className="suggestion-main">
+                    <span className="suggestion-title">{template.description}</span>
+                    <span className="suggestion-meta">
+                      {[template.counterparty, template.category, template.account]
+                        .filter(Boolean)
+                        .join(' · ')}
+                      {` · ${template.uses}×`}
+                    </span>
+                  </span>
+                  <span className="suggestion-amount money">
+                    {formatMoney(template.last_amount, reference.currency, reference.locale)}
+                    {template.amount_varies && <span className="muted small">{' ~'}</span>}
+                  </span>
+                </>
+              )}
+              keyOf={(t) => `${t.description}|${t.counterparty_id}|${t.category_id}|${t.account_id}`}
+              placeholder="What was it?"
+              inputRef={descriptionRef}
+              autoFocus
+            />
 
-        <Autocomplete<{ id: number; name: string; uses: number }>
-          label={draft.kind === 'expense' ? 'Payee' : 'Payer'}
-          value={draft.counterparty}
-          onChange={(value) => setDraft((c) => ({ ...c, counterparty: value }))}
-          onPick={(item) => setDraft((c) => ({ ...c, counterparty: item.name }))}
-          fetchItems={fetchCounterparties}
-          renderItem={(item) => (
-            <>
-              <span className="suggestion-main">
-                <span className="suggestion-title">{item.name}</span>
-              </span>
-              <span className="suggestion-meta">{item.uses}×</span>
-            </>
-          )}
-          keyOf={(item) => String(item.id)}
-          placeholder={draft.kind === 'expense' ? 'Who was paid?' : 'Who paid?'}
-        />
+            <Autocomplete<{ id: number; name: string; uses: number }>
+              label={draft.kind === 'expense' ? 'Payee' : 'Payer'}
+              value={draft.counterparty}
+              onChange={(value) => setDraft((c) => ({ ...c, counterparty: value }))}
+              onPick={(item) => setDraft((c) => ({ ...c, counterparty: item.name }))}
+              fetchItems={fetchCounterparties}
+              renderItem={(item) => (
+                <>
+                  <span className="suggestion-main">
+                    <span className="suggestion-title">{item.name}</span>
+                  </span>
+                  <span className="suggestion-meta">{item.uses}×</span>
+                </>
+              )}
+              keyOf={(item) => String(item.id)}
+              placeholder={draft.kind === 'expense' ? 'Who was paid?' : 'Who paid?'}
+            />
+          </>
+        )}
 
         <div className="field">
           <label htmlFor="amount-input">Amount</label>
@@ -333,44 +382,67 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
           />
         </div>
 
+        {!isTransfer && (
+          <div className="field">
+            <label>Category</label>
+            <div className="chips">
+              {categories.map((category) => (
+                <button
+                  key={category.id}
+                  type="button"
+                  className="chip selectable"
+                  aria-pressed={draft.categoryId === category.id}
+                  onClick={() => setDraft((c) => ({ ...c, categoryId: category.id }))}
+                >
+                  {category.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="field">
-          <label>Category</label>
+          <label>{isTransfer ? 'From' : 'Account'}</label>
           <div className="chips">
-            {categories.map((category) => (
+            {accounts.map((account) => (
               <button
-                key={category.id}
+                key={account.id}
                 type="button"
                 className="chip selectable"
-                aria-pressed={draft.categoryId === category.id}
-                onClick={() => setDraft((c) => ({ ...c, categoryId: category.id }))}
+                aria-pressed={draft.accountId === account.id}
+                disabled={isTransfer && draft.toAccountId === account.id}
+                onClick={() =>
+                  setDraft((c) => ({
+                    ...c,
+                    accountId: c.accountId === account.id && !isTransfer ? null : account.id,
+                  }))
+                }
               >
-                {category.name}
+                {account.name}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="field">
-          <label>Channel</label>
-          <div className="chips">
-            {channels.map((channel) => (
-              <button
-                key={channel.id}
-                type="button"
-                className="chip selectable"
-                aria-pressed={draft.channelId === channel.id}
-                onClick={() =>
-                  setDraft((c) => ({
-                    ...c,
-                    channelId: c.channelId === channel.id ? null : channel.id,
-                  }))
-                }
-              >
-                {channel.name}
-              </button>
-            ))}
+        {isTransfer && (
+          <div className="field">
+            <label>To</label>
+            <div className="chips">
+              {accounts.map((account) => (
+                <button
+                  key={account.id}
+                  type="button"
+                  className="chip selectable"
+                  aria-pressed={draft.toAccountId === account.id}
+                  disabled={draft.accountId === account.id}
+                  onClick={() => setDraft((c) => ({ ...c, toAccountId: account.id }))}
+                >
+                  {account.name}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {duplicates.length > 0 && (
@@ -431,7 +503,9 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
                   {entry.description}
                   <div className="meta">
                     {formatDayLabel(entry.occurredOn)}
-                    {entry.counterparty ? ` · ${entry.counterparty}` : ''} · {entry.category}
+                    {entry.kind === 'transfer'
+                      ? ` · ${entry.account} → ${entry.toAccount}`
+                      : `${entry.counterparty ? ` · ${entry.counterparty}` : ''} · ${entry.category}`}
                   </div>
                 </span>
                 <span className="money">

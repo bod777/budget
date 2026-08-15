@@ -1,23 +1,39 @@
-export type Kind = 'expense' | 'income';
+export type Kind = 'expense' | 'income' | 'transfer';
+/** Kinds that carry a category and a counterparty. */
+export type SpendKind = 'expense' | 'income';
 
 export interface Category {
   id: number;
-  kind: Kind;
+  kind: SpendKind;
   name: string;
   bucket: 'fixed' | 'variable' | null;
   sortOrder: number;
 }
 
-export interface Channel {
+export interface Account {
   id: number;
   name: string;
-  kinds: Kind[];
+  kind: 'current' | 'credit' | 'cash' | 'savings' | 'other';
+  usableFor: SpendKind[];
   sortOrder: number;
+}
+
+export interface AccountBalance extends Account {
+  openingBalance: number | null;
+  openingOn: string | null;
+  archived: boolean;
+  movement: number;
+  movementCount: number;
+  /** Null when no opening balance has been set. */
+  balance: number | null;
+  /** For credit cards: the balance expressed as what is owed. */
+  owed: number | null;
+  needsOpeningBalance: boolean;
 }
 
 export interface Reference {
   categories: Category[];
-  channels: Channel[];
+  accounts: Account[];
   currency: string;
   locale: string;
 }
@@ -28,8 +44,8 @@ export interface Template {
   counterparty: string | null;
   category_id: number;
   category: string;
-  channel_id: number | null;
-  channel: string | null;
+  account_id: number | null;
+  account: string | null;
   uses: number;
   last_used: string;
   last_amount: number;
@@ -51,8 +67,10 @@ export interface Entry {
   categoryId: number;
   category: string;
   bucket: 'fixed' | 'variable' | null;
-  channelId: number | null;
-  channel: string | null;
+  accountId: number | null;
+  account: string | null;
+  toAccountId: number | null;
+  toAccount: string | null;
   note: string | null;
   source: 'manual' | 'import' | 'recurring';
   loggedAt: string;
@@ -70,11 +88,10 @@ export interface BudgetLine {
 }
 
 export interface SavingsLine {
-  id: number;
+  accountId: number;
   name: string;
   budget: number;
   actual: number;
-  sort_order: number;
 }
 
 export interface PayRuleRow {
@@ -132,8 +149,8 @@ export interface PendingEntry {
   amount: number | null;
   categoryId: number;
   category: string;
-  channelId: number | null;
-  channel: string | null;
+  accountId: number | null;
+  account: string | null;
   ruleId: number;
 }
 
@@ -146,8 +163,8 @@ export interface RecurringRule {
   amount: number | null;
   categoryId: number;
   category: string;
-  channelId: number | null;
-  channel: string | null;
+  accountId: number | null;
+  account: string | null;
   cadence: 'weekly' | 'fortnightly' | 'monthly' | 'yearly';
   anchorDate: string;
   active: boolean;
@@ -161,7 +178,7 @@ export interface RecurringSuggestion {
   counterparty: string | null;
   categoryId: number;
   category: string;
-  channelId: number | null;
+  accountId: number | null;
   cadence: RecurringRule['cadence'];
   anchorDate: string;
   amount: number | null;
@@ -260,6 +277,17 @@ export const api = {
   deleteEntry: (id: number) =>
     request<{ deleted: number }>(`/api/entries/${id}`, { method: 'DELETE' }),
 
+  accounts: () =>
+    request<{ accounts: AccountBalance[]; savingsTotal: number | null }>('/api/accounts'),
+  updateAccount: (
+    id: number,
+    payload: { openingBalance?: number | null; openingOn?: string | null; kind?: string; name?: string },
+  ) =>
+    request<{ updated: number }>(`/api/accounts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+
   months: () => request<{ months: string[] }>('/api/months'),
   paySchedule: () =>
     request<{
@@ -284,7 +312,7 @@ export const api = {
     request<{ deleted: number }>(`/api/pay-schedule/${id}`, { method: 'DELETE' }),
   sheetSyncStatus: () => request<SheetSyncStatus>('/api/sheet-sync'),
   runSheetSync: () =>
-    request<{ ok: true; expenses: number; income: number; periods: number }>(
+    request<{ ok: true; expenses: number; income: number; transfers: number; periods: number }>(
       '/api/sheet-sync/run',
       { method: 'POST', body: '{}' },
     ),
