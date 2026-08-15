@@ -181,7 +181,7 @@ export async function balanceRows(): Promise<CellValue[][]> {
             coalesce(sum(m.delta), 0) as movement
      from accounts a
      left join movements m on m.account_id = a.id
-       and (a.opening_on is null or m.occurred_on >= a.opening_on)
+       and (a.opening_on is null or m.occurred_on > a.opening_on)
      where a.archived = false
      group by a.id
      order by a.sort_order, a.name`,

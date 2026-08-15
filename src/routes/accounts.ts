@@ -18,10 +18,15 @@ import { tidy } from '../lib/text.ts';
 const ACCOUNT_KINDS = new Set(['current', 'credit', 'cash', 'savings', 'other']);
 
 /**
- * Movements only count from the day the opening balance was taken, otherwise
- * older entries would be double-counted against a figure that already includes
- * them. An account with no opening balance has an unknown balance, which is
- * reported as unknown rather than silently as zero.
+ * An opening balance is the *closing* balance of the day it is dated, the way a
+ * bank statement reads. Only entries after that date move it.
+ *
+ * The alternative -- counting the opening day itself -- double-counts anything
+ * already logged for that day, because the figure read off a banking app
+ * naturally includes the day's activity so far.
+ *
+ * An account with no opening balance has an unknown balance, reported as
+ * unknown rather than silently as zero.
  */
 const BALANCE_SQL = `
   with movements as (
@@ -55,7 +60,7 @@ const BALANCE_SQL = `
   from accounts a
   left join movements m
     on m.account_id = a.id
-   and (a.opening_on is null or m.occurred_on >= a.opening_on)
+   and (a.opening_on is null or m.occurred_on > a.opening_on)
   group by a.id
   order by a.sort_order, a.name
 `;

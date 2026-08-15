@@ -90,13 +90,13 @@ export function Accounts({ reference, refreshKey, compact = false, toast }: Prop
                   <span className="cat-name">{account.name}</span>
                   <div className="small muted">
                     {KIND_LABEL[account.kind]}
-                    {account.openingOn ? ` · from ${account.openingOn}` : ''}
+                    {account.openingOn ? ` · balance at end of ${account.openingOn}` : ''}
                   </div>
                   {!compact && editing === account.id && (
                     <div className="stack" style={{ marginTop: 8 }}>
                       <div className="row">
                         <div className="field" style={{ marginBottom: 0 }}>
-                          <label htmlFor={`bal-${account.id}`}>Balance now</label>
+                          <label htmlFor={`bal-${account.id}`}>Closing balance</label>
                           <input
                             id={`bal-${account.id}`}
                             type="text"
@@ -112,7 +112,7 @@ export function Accounts({ reference, refreshKey, compact = false, toast }: Prop
                           />
                         </div>
                         <div className="field" style={{ marginBottom: 0 }}>
-                          <label htmlFor={`on-${account.id}`}>As of</label>
+                          <label htmlFor={`on-${account.id}`}>At end of</label>
                           <input
                             id={`on-${account.id}`}
                             type="date"
@@ -122,12 +122,12 @@ export function Accounts({ reference, refreshKey, compact = false, toast }: Prop
                           />
                         </div>
                       </div>
-                      {account.kind === 'credit' && (
-                        <p className="small muted" style={{ margin: 0 }}>
-                          A card you owe money on is a negative balance — enter −432.10 if you owe
-                          €432.10.
-                        </p>
-                      )}
+                      <p className="small muted" style={{ margin: 0 }}>
+                          The balance at the close of that day, including anything already spent on
+                          it. Only entries dated after it move the balance.
+                          {account.kind === 'credit' &&
+                          ' A card you owe money on is negative — enter −432.10 if you owe €432.10.'}
+                      </p>
                       <div className="spread">
                         <button
                           type="button"
