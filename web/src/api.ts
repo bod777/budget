@@ -64,6 +64,25 @@ export interface QuickPickOption extends Template {
   automatic: boolean;
 }
 
+export interface PeriodStat {
+  month: string;
+  start: string;
+  end: string;
+  expenses: number;
+  income: number;
+  savings: number;
+  net: number;
+  /** The period still in progress, so its totals are incomplete. */
+  partial: boolean;
+}
+
+export interface CategoryStat {
+  name: string;
+  bucket: 'fixed' | 'variable' | null;
+  amount: number;
+  previous: number;
+}
+
 export interface Entry {
   id: number;
   kind: Kind;
@@ -291,6 +310,13 @@ export const api = {
     }),
   deleteEntry: (id: number) =>
     request<{ deleted: number }>(`/api/entries/${id}`, { method: 'DELETE' }),
+
+  statsPeriods: (limit = 12) =>
+    request<{ periods: PeriodStat[] }>(`/api/stats/periods?limit=${limit}`),
+  statsCategories: (month?: string) =>
+    request<{ month: string; categories: CategoryStat[] }>(
+      `/api/stats/categories${month ? `?month=${month}` : ''}`,
+    ),
 
   accounts: () =>
     request<{ accounts: AccountBalance[]; savingsTotal: number | null }>('/api/accounts'),

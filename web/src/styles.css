@@ -790,3 +790,135 @@ button:focus-visible {
     animation: none !important;
   }
 }
+
+/* ---- charts ----
+   Palette from the validated categorical set: slot 1 blue, slot 2 orange.
+   Both modes pass the lightness band, chroma floor, CVD separation, the
+   normal-vision floor and 3:1 contrast against this app's own surfaces
+   (#ffffff light, #171a21 dark) -- checked with the validator, not by eye.
+   Dark is its own steps from the same hues, not an automatic flip. */
+
+.viz-root {
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --grid: color-mix(in srgb, var(--text-dim) 22%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .viz-root {
+    --series-1: #3987e5;
+    --series-2: #d95926;
+  }
+}
+
+:root[data-theme='dark'] .viz-root {
+  --series-1: #3987e5;
+  --series-2: #d95926;
+}
+
+.chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  touch-action: pan-y;
+}
+
+/* 2px strokes, round joins; no fills under the lines so neither series hides
+   the other. */
+.chart .line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chart .line.series-1 { stroke: var(--series-1); }
+.chart .line.series-2 { stroke: var(--series-2); }
+
+/* A surface ring keeps overlapping markers separable where the lines cross. */
+.chart .dot {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+.chart .dot.series-1 { fill: var(--series-1); }
+.chart .dot.series-2 { fill: var(--series-2); }
+
+.chart .grid {
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+
+.chart .crosshair {
+  stroke: var(--text-dim);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.chart .axis {
+  fill: var(--text-dim);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Identity travels with a swatch beside the text, never by colouring the text. */
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  vertical-align: baseline;
+  margin-right: 6px;
+}
+
+.chart-readout {
+  min-height: 46px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+/* Magnitude only, so one hue rather than a colour per category. */
+.bar-track {
+  display: block;
+  width: 100%;
+  min-width: 48px;
+  height: 10px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--text-dim) 14%, transparent);
+  overflow: hidden;
+}
+
+.bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 5px;
+  background: var(--series-1);
+}
+
+.compact-segmented {
+  width: auto;
+  padding: 3px;
+  gap: 2px;
+}
+
+.compact-segmented button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 13px;
+}

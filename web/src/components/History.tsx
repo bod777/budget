@@ -8,6 +8,7 @@ import {
   type Reference,
 } from '../api.ts';
 import { EntryEditor } from './EntryEditor.tsx';
+import { Trends } from './Trends.tsx';
 
 interface Props {
   reference: Reference;
@@ -54,6 +55,9 @@ export function History({ reference, refreshKey, onChanged }: Props) {
 
   return (
     <div>
+      <Trends reference={reference} refreshKey={refreshKey} />
+
+      <h2>Entries</h2>
       <div className="field">
         <input
           type="text"
