@@ -34,12 +34,27 @@ const SAVINGS_ACCOUNTS: Record<string, string> = {
   'rainy day': 'Rainy Day Savings',
 };
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Sheets allows a limited number of reads per minute and this makes two per
+ * workbook, so a run over three years of them will be throttled. A 429 is a
+ * "wait", not a failure.
+ */
+async function getWithRetry(url: string, token: string, attempts = 5): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+    if (response.status !== 429 || attempt >= attempts - 1) return response;
+    await sleep(2000 * 2 ** attempt);
+  }
+}
+
 async function fetchTab(token: string, id: string): Promise<string | null> {
   // The values endpoint returns the grid directly; asking for the first sheet
   // by index avoids depending on its title.
-  const meta = await fetch(
+  const meta = await getWithRetry(
     `https://sheets.googleapis.com/v4/spreadsheets/${id}?fields=sheets.properties.title`,
-    { headers: { authorization: `Bearer ${token}` } },
+    token,
   );
   if (!meta.ok) {
     if (meta.status === 403) throw new Error('not shared with the service account');
@@ -51,9 +66,9 @@ async function fetchTab(token: string, id: string): Promise<string | null> {
   if (!first) return null;
 
   const range = encodeURIComponent(`'${first.replace(/'/g, "''")}'!A1:M60`);
-  const response = await fetch(
+  const response = await getWithRetry(
     `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${range}?majorDimension=ROWS`,
-    { headers: { authorization: `Bearer ${token}` } },
+    token,
   );
   if (!response.ok) throw new Error(`values ${response.status}`);
   const payload = (await response.json()) as { values?: string[][] };
@@ -120,6 +135,8 @@ async function main() {
         }
       }
       process.stdout.write('.');
+      // Stay inside the per-minute read quota rather than relying on retries.
+      await sleep(400);
     } catch (error) {
       problems.push(`${workbook.title}: ${error instanceof Error ? error.message : 'failed'}`);
       process.stdout.write('x');
@@ -141,8 +158,13 @@ async function main() {
     '## Period boundaries',
     '',
     boundaryNotes.length
-      ? ['Sheets whose dates disagree with the computed pay schedule:', '', ...boundaryNotes.map((n) => `- ${n}`)].join('\n')
-      : 'Every sheet\'s own start date matches the period the app computes.',
+      ? [
+          'These periods keep the dates recorded in the sheet, not the computed ones —',
+          'pay landing early before Christmas is real and no day-of-month rule can know it:',
+          '',
+          ...boundaryNotes.map((n) => `- ${n}`),
+        ].join('\n')
+      : "Every sheet's own start date matches the period the app computes.",
     '',
     '## Budgets found',
     '',
@@ -186,7 +208,12 @@ async function main() {
   await withTransaction(async (client) => {
     for (const budget of parsed) {
       const monthDate = `${budget.month}-01`;
-      const period = rules.length ? periodFor(budget.month, rules) : null;
+      // Where a sheet records its own dates they win: an employer paying
+      // early before Christmas is real, and no rule about the 28th can know
+      // it. The computed period is only the fallback.
+      const computed = rules.length ? periodFor(budget.month, rules) : null;
+      const periodStart = budget.startingDate ?? computed?.start ?? null;
+      const periodEnd = budget.endingDate ?? computed?.end ?? null;
 
       await client.query(
         `insert into budget_months (month, opening_surplus, period_start, period_end)
@@ -195,7 +222,7 @@ async function main() {
            opening_surplus = coalesce(excluded.opening_surplus, budget_months.opening_surplus),
            period_start = coalesce(budget_months.period_start, excluded.period_start),
            period_end = coalesce(budget_months.period_end, excluded.period_end)`,
-        [monthDate, budget.openingSurplus, period?.start ?? null, period?.end ?? null],
+        [monthDate, budget.openingSurplus, periodStart, periodEnd],
       );
       months += 1;
 
