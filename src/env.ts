@@ -1,3 +1,5 @@
+import { parseServiceAccount } from './lib/google-service-account.ts';
+
 function required(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is not set`);
@@ -9,6 +11,11 @@ function emailList(raw: string): string[] {
     .split(',')
     .map((entry) => entry.trim().toLowerCase())
     .filter(Boolean);
+}
+
+const serviceAccount = parseServiceAccount(process.env.GOOGLE_SERVICE_ACCOUNT_JSON ?? '');
+if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON && !serviceAccount) {
+  console.warn('[sheets] GOOGLE_SERVICE_ACCOUNT_JSON could not be parsed — mirroring is disabled.');
 }
 
 const googleClientId = process.env.GOOGLE_CLIENT_ID ?? '';
@@ -41,6 +48,12 @@ export const env = {
    * proxy headers.
    */
   publicUrl: (process.env.PUBLIC_URL ?? '').replace(/\/+$/, ''),
+
+  sheets: {
+    serviceAccount,
+    spreadsheetId: (process.env.SHEETS_SPREADSHEET_ID ?? '').trim(),
+    enabled: Boolean(serviceAccount && (process.env.SHEETS_SPREADSHEET_ID ?? '').trim()),
+  },
 
   /** Local currency, used for formatting only. */
   currency: process.env.CURRENCY ?? 'EUR',

@@ -14,6 +14,7 @@ import { registerSuggestRoutes } from './routes/suggest.ts';
 import { registerBudgetRoutes } from './routes/budget.ts';
 import { registerPayScheduleRoutes } from './routes/pay-schedule.ts';
 import { registerRecurringRoutes, generatePending } from './routes/recurring.ts';
+import { registerSheetSyncRoutes, scheduleSheetSync } from './routes/sheet-sync.ts';
 import { pool } from './db.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -40,6 +41,7 @@ registerSuggestRoutes(app);
 registerBudgetRoutes(app);
 registerPayScheduleRoutes(app);
 registerRecurringRoutes(app);
+registerSheetSyncRoutes(app);
 
 if (existsSync(webDist)) {
   await app.register(fastifyStatic, { root: webDist });
@@ -64,6 +66,8 @@ setInterval(
   },
   3600 * 1000,
 ).unref();
+
+scheduleSheetSync(app);
 
 const close = async () => {
   await app.close();

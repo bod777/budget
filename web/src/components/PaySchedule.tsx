@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type PayRuleRow } from '../api.ts';
+import { SheetMirror } from './SheetMirror.tsx';
 
 interface Props {
   toast: (message: string) => void;
@@ -276,6 +277,8 @@ export function PaySchedule({ toast, onChanged }: Props) {
           Recalculate past periods
         </button>
       </div>
+
+      <SheetMirror toast={toast} />
     </div>
   );
 }

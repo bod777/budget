@@ -170,6 +170,13 @@ export interface RecurringSuggestion {
   medianGapDays: number;
 }
 
+export interface SheetSyncStatus {
+  configured: boolean;
+  spreadsheetId: string | null;
+  serviceAccountEmail: string | null;
+  lastRun: { at: string; status: 'never' | 'ok' | 'failed'; detail: string | null } | null;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -275,6 +282,12 @@ export const api = {
     }),
   deletePayRule: (id: number) =>
     request<{ deleted: number }>(`/api/pay-schedule/${id}`, { method: 'DELETE' }),
+  sheetSyncStatus: () => request<SheetSyncStatus>('/api/sheet-sync'),
+  runSheetSync: () =>
+    request<{ ok: true; expenses: number; income: number; periods: number }>(
+      '/api/sheet-sync/run',
+      { method: 'POST', body: '{}' },
+    ),
   rederivePeriods: (from?: string) =>
     request<{ rederived: number }>('/api/pay-schedule/rederive', {
       method: 'POST',

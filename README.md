@@ -212,6 +212,52 @@ Google account, so sign-in stays disabled until it is set.
 `PUBLIC_URL` fixes the redirect URI rather than deriving it from proxy headers,
 because Google matches it against the registered value character for character.
 
+## Google Sheets backup
+
+Optional one-way mirror of the database into a Google Sheet: three tabs
+(`Expenses`, `Income`, `Periods`), rewritten in full once a day and on demand
+from **Settings**.
+
+**One-way on purpose.** Sheet rows have no stable identifier, so reconciling
+edits made on both sides means matching on date, amount and description —
+guesswork that loses data silently, and exactly the duplicate-prone situation
+this app exists to escape. The database is the source of truth; nothing typed
+into the sheet is ever read back.
+
+Each entry carries a **Budget period** column, so the sheet can be pivoted by
+payday-to-payday period rather than calendar month — which is the thing a plain
+CSV export cannot give you.
+
+### Setting it up
+
+**1. Create a service account** — a robot account for the server, separate from
+the OAuth client used for sign-in. A login credential should not also carry
+data-writing powers, and adding a Sheets scope to the sign-in flow would drag it
+into Google's verification review.
+
+- [console.cloud.google.com](https://console.cloud.google.com) → IAM & Admin →
+  Service Accounts → **Create service account**
+- Then **Keys → Add key → Create new key → JSON**, and download it
+- Enable the **Google Sheets API** for the project under APIs & Services
+
+**2. Create a spreadsheet** and share it with the service account's email
+(`something@project.iam.gserviceaccount.com`) as an **Editor**. Take the id from
+its URL: `docs.google.com/spreadsheets/d/<THIS_PART>/edit`.
+
+**3. Set the variables:**
+
+```sh
+# base64 avoids the private key's newlines being mangled in transit
+railway variable set "GOOGLE_SERVICE_ACCOUNT_JSON=$(base64 -i key.json)" --service budget-app
+railway variable set 'SHEETS_SPREADSHEET_ID=<the id>' --service budget-app
+```
+
+Raw JSON works too; escaped `\n` in the private key is handled either way. With
+both set, Settings gains a "Mirror now" button and the nightly job starts.
+
+`npm run preview-sheet` prints what would be written without contacting Google,
+which is the quickest way to check the output before wiring credentials up.
+
 ## Security notes
 
 - Single password, bcrypt-hashed, checked against a rate-limited endpoint
