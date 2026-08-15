@@ -115,19 +115,6 @@ export function Dashboard({ reference, refreshKey }: Props) {
     }
   }
 
-  async function startMonth() {
-    setBusy(true);
-    try {
-      await api.initMonth(month);
-      const updated = await api.month(month);
-      setView(updated);
-      setDrafts(
-        Object.fromEntries(updated.lines.map((line) => [line.categoryId, String(line.budget)])),
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <div>
@@ -198,22 +185,10 @@ export function Dashboard({ reference, refreshKey }: Props) {
       </div>
       <Accounts reference={reference} refreshKey={refreshKey} compact />
 
-      {!view.exists && (
+      {view.inheritedFrom && (
         <div className="banner info" style={{ marginTop: 14 }}>
-          <div className="spread">
-            <span>
-              No budget set for {monthLabel(month)}. Start it from the previous month&apos;s
-              plan and carry the surplus forward.
-            </span>
-            <button
-              type="button"
-              className="btn small"
-              onClick={() => void startMonth()}
-              disabled={busy}
-            >
-              Start
-            </button>
-          </div>
+          Carried forward from {monthLabel(view.inheritedFrom)}. Edit any figure below and it
+          becomes this period's own budget.
         </div>
       )}
 

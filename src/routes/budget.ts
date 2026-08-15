@@ -61,6 +61,67 @@ async function boundsFor(month: string, rules: PayRule[]): Promise<Period> {
   return periodFor(month, rules);
 }
 
+
+/**
+ * What a period opens with.
+ *
+ * A stored figure always wins, so correcting an old period never silently
+ * rewrites every one after it. Where nothing is stored -- a period not yet
+ * started -- it is rolled forward from the last one that was, so a new budget
+ * arrives with the surplus already carried rather than at zero.
+ */
+async function openingSurplusFor(month: string, rules: PayRule[]): Promise<number> {
+  const stored = await query<{ opening_surplus: number }>(
+    'select opening_surplus from budget_months where month = $1::date',
+    [`${month}-01`],
+  );
+  if (stored[0]) return Number(stored[0].opening_surplus);
+
+  // Walk back to the most recent period that has a stored opening, then roll
+  // it forward one period at a time.
+  const anchor = await query<{ month: string }>(
+    "select to_char(max(month), 'YYYY-MM') as month from budget_months where month < $1::date",
+    [`${month}-01`],
+  );
+  const from = anchor[0]?.month;
+  if (!from) return 0;
+
+  let surplus = await query<{ opening_surplus: number }>(
+    'select opening_surplus from budget_months where month = $1::date',
+    [`${from}-01`],
+  ).then((rows) => Number(rows[0]?.opening_surplus ?? 0));
+
+  let cursor = from;
+  for (let guard = 0; guard < 36 && cursor < month; guard++) {
+    const period = periodFor(cursor, rules);
+    const sums = await query<{ kind: string; total: number }>(
+      `select c.kind, coalesce(sum(e.amount), 0) as total
+       from entries e join categories c on c.id = e.category_id
+       where e.occurred_on >= $1::date and e.occurred_on < $2::date
+         and e.kind <> 'transfer'
+       group by c.kind`,
+      [period.start, period.end],
+    );
+    const income = Number(sums.find((r) => r.kind === 'income')?.total ?? 0);
+    const expense = Number(sums.find((r) => r.kind === 'expense')?.total ?? 0);
+    const savings = await query<{ total: number }>(
+      `select coalesce(sum(
+         case when e.to_account_id = a.id then e.amount else -e.amount end
+       ), 0) as total
+       from entries e
+       join accounts a on a.kind = 'savings'
+         and (e.to_account_id = a.id or e.account_id = a.id)
+       where e.kind = 'transfer'
+         and e.occurred_on >= $1::date and e.occurred_on < $2::date`,
+      [period.start, period.end],
+    ).then((rows) => Number(rows[0]?.total ?? 0));
+
+    surplus = Math.round((surplus + income - expense - savings) * 100) / 100;
+    cursor = shiftMonth(cursor, 1);
+  }
+  return surplus;
+}
+
 export function registerBudgetRoutes(app: FastifyInstance) {
   app.get<{ Params: { month: string } }>('/api/months/:month', async (request, reply) => {
     const month = request.params.month;
@@ -85,10 +146,20 @@ export function registerBudgetRoutes(app: FastifyInstance) {
     );
     const actualByCategory = new Map(actuals.map((r) => [r.category_id, Number(r.actual)]));
 
-    const budgets = await query<{ category_id: number; amount: number; note: string | null }>(
-      'select category_id, amount, note from budget_lines where month = $1::date',
+    const source = await query<{ month: string }>(
+      `select to_char(max(month), 'YYYY-MM') as month
+       from budget_lines where month <= $1::date`,
       [start],
     );
+    const sourceMonth = source[0]?.month ?? null;
+    const inheritedFrom = sourceMonth && sourceMonth !== month ? sourceMonth : null;
+
+    const budgets = sourceMonth
+      ? await query<{ category_id: number; amount: number; note: string | null }>(
+          'select category_id, amount, note from budget_lines where month = $1::date',
+          [`${sourceMonth}-01`],
+        )
+      : [];
     const budgetByCategory = new Map(budgets.map((r) => [r.category_id, r]));
 
     const categories = await query<{
@@ -140,7 +211,8 @@ export function registerBudgetRoutes(app: FastifyInstance) {
              and e.occurred_on >= $2::date and e.occurred_on < $3::date
          ), 0) as actual
        from accounts a
-       left join savings_targets t on t.account_id = a.id and t.month = $1::date
+       left join savings_targets t on t.account_id = a.id
+         and t.month = (select max(month) from savings_targets where month <= $1::date)
        where a.kind = 'savings' and a.archived = false
        order by a.sort_order, a.name`,
       [start, period.start, period.end],
@@ -160,7 +232,7 @@ export function registerBudgetRoutes(app: FastifyInstance) {
     const savingsActual =
       Math.round(savings.reduce((t, s) => t + Number(s.actual), 0) * 100) / 100;
 
-    const openingSurplus = monthRow[0] ? Number(monthRow[0].opening_surplus) : 0;
+    const openingSurplus = await openingSurplusFor(month, rules);
     const incomeSurplusBudget = Math.round((incomeBudget - expenseBudget) * 100) / 100;
     const incomeSurplusActual = Math.round((incomeActual - expenseActual) * 100) / 100;
     const thisMonthBudget = Math.round((incomeSurplusBudget - savingsBudget) * 100) / 100;
@@ -169,6 +241,8 @@ export function registerBudgetRoutes(app: FastifyInstance) {
     return reply.send({
       month,
       exists: monthRow.length > 0,
+      // Which period these budget figures came from, when not set here yet.
+      inheritedFrom,
       periodStart: period.start,
       periodEnd: period.end,
       openingSurplus,

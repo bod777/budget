@@ -140,6 +140,8 @@ export interface Period {
 export interface MonthView {
   month: string;
   exists: boolean;
+  /** The period these budget figures were carried from, if not set here yet. */
+  inheritedFrom: string | null;
   /** Inclusive start of the payday-to-payday period. */
   periodStart: string;
   /** Exclusive end. */

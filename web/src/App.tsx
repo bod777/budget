@@ -11,7 +11,7 @@ type Tab = 'add' | 'month' | 'trends' | 'history' | 'auto';
 
 const TABS: { id: Tab; label: string; glyph: string }[] = [
   { id: 'add', label: 'Add', glyph: '＋' },
-  { id: 'month', label: 'Month', glyph: '◒' },
+  { id: 'month', label: 'Budget', glyph: '◒' },
   { id: 'trends', label: 'Trends', glyph: '↗' },
   { id: 'history', label: 'History', glyph: '☰' },
   { id: 'auto', label: 'Recurring', glyph: '↻' },
@@ -187,7 +187,7 @@ export function App() {
               : tab === 'add'
                 ? 'Add'
                 : tab === 'month'
-                  ? 'This month'
+                  ? 'Budget'
                   : tab === 'trends'
                     ? 'Trends'
                     : tab === 'history'

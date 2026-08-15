@@ -17,7 +17,9 @@
     "dev-seed": "tsx scripts/dev-seed.ts",
     "test": "tsx --test tests/*.test.ts",
     "import:prod": "DATABASE_URL=$(./scripts/prod-db-url.sh) tsx scripts/import-csv.ts",
-    "preview-sheet": "tsx --env-file=.env scripts/preview-sheet.ts"
+    "preview-sheet": "tsx --env-file=.env scripts/preview-sheet.ts",
+    "backfill-budgets": "tsx --env-file=.env scripts/backfill-budgets.ts",
+    "backfill-budgets:prod": "DATABASE_URL=$(./scripts/prod-db-url.sh) tsx --env-file=.env scripts/backfill-budgets.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
