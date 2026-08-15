@@ -3,6 +3,21 @@ dist/
 web/dist/
 .env
 .env.local
+
+# Google service account keys. These are long-lived credentials and downloads
+# land here by default, so they are excluded by shape rather than by name.
+*.json.key
+*-service-account*.json
+*service_account*.json
+budget-tool-*.json
+gcp-*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!railway.json
+!web/package.json
+!web/package-lock.json
+!web/tsconfig.json
 data/raw/*.csv
 data/normalised/
 *.log
