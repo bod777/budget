@@ -1,8 +1,19 @@
 import type { FastifyInstance } from 'fastify';
 import { query, withTransaction } from '../db.ts';
+import {
+  periodContaining,
+  periodFor,
+  shiftMonth,
+  type PayRule,
+  type Period,
+} from '../lib/pay-periods.ts';
 
 /**
- * Monthly rollup, replacing the copied budget workbook.
+ * Period rollup, replacing the copied budget workbook.
+ *
+ * Periods run payday to payday rather than across the calendar month — see
+ * lib/pay-periods.ts. The end is exclusive, so the payday that opens a period
+ * is counted once, in the period it funds.
  *
  * The surplus chain is taken from the spreadsheet and verified against
  * August 2026, where opening 300.00 + this month 1,700.00 = 2,000.00:
@@ -12,43 +23,64 @@ import { query, withTransaction } from '../db.ts';
  *   closingSurplus    = openingSurplus + thisMonthSurplus
  *
  * Opening surplus is stored rather than recomputed recursively so that a
- * correction to an old month does not silently rewrite every month after it.
+ * correction to an old period does not silently rewrite every one after it.
  */
-
-function monthBounds(month: string) {
-  const start = `${month}-01`;
-  return { start, next: `(date '${start}' + interval '1 month')::date` };
-}
 
 function isMonth(value: string): boolean {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 }
 
-function previousMonth(month: string): string {
-  const [y, m] = month.split('-').map(Number) as [number, number];
-  const date = new Date(Date.UTC(y, m - 2, 1));
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+async function payRules(): Promise<PayRule[]> {
+  const rows = await query<{ effective_from: string; day_rule: string; note: string | null }>(
+    'select effective_from, day_rule, note from pay_schedule order by effective_from',
+  );
+  return rows.map((row) => ({
+    effectiveFrom: String(row.effective_from).slice(0, 10),
+    dayRule: row.day_rule === 'last' ? 'last' : Number(row.day_rule),
+    note: row.note,
+  }));
+}
+
+/**
+ * Boundaries for a period. A stored pair wins over a computed one, so editing
+ * the schedule cannot silently move a period that has already been closed off.
+ */
+async function boundsFor(month: string, rules: PayRule[]): Promise<Period> {
+  const stored = await query<{ period_start: string | null; period_end: string | null }>(
+    'select period_start, period_end from budget_months where month = $1::date',
+    [`${month}-01`],
+  );
+  const row = stored[0];
+  if (row?.period_start && row.period_end) {
+    return {
+      month,
+      start: String(row.period_start).slice(0, 10),
+      end: String(row.period_end).slice(0, 10),
+    };
+  }
+  return periodFor(month, rules);
 }
 
 export function registerBudgetRoutes(app: FastifyInstance) {
   app.get<{ Params: { month: string } }>('/api/months/:month', async (request, reply) => {
     const month = request.params.month;
     if (!isMonth(month)) return reply.code(400).send({ error: 'month must be YYYY-MM' });
-    const { start } = monthBounds(month);
 
-    const monthRow = await query<{ month: string; opening_surplus: number; note: string | null }>(
-      'select month, opening_surplus, note from budget_months where month = $1::date',
+    const rules = await payRules();
+    const period = await boundsFor(month, rules);
+    const start = `${month}-01`;
+
+    const monthRow = await query<{ opening_surplus: number; note: string | null }>(
+      'select opening_surplus, note from budget_months where month = $1::date',
       [start],
     );
 
-    // Actuals per category for the month.
     const actuals = await query<{ category_id: number; actual: number }>(
       `select category_id, sum(amount) as actual
        from entries
-       where occurred_on >= $1::date
-         and occurred_on < ($1::date + interval '1 month')
+       where occurred_on >= $1::date and occurred_on < $2::date
        group by category_id`,
-      [start],
+      [period.start, period.end],
     );
     const actualByCategory = new Map(actuals.map((r) => [r.category_id, Number(r.actual)]));
 
@@ -63,11 +95,9 @@ export function registerBudgetRoutes(app: FastifyInstance) {
       kind: 'expense' | 'income';
       name: string;
       bucket: 'fixed' | 'variable' | null;
-      sort_order: number;
     }>(
-      `select id, kind, name, bucket, sort_order
-       from categories
-       where archived = false
+      `select id, kind, name, bucket
+       from categories where archived = false
        order by kind, sort_order, name`,
     );
 
@@ -126,6 +156,8 @@ export function registerBudgetRoutes(app: FastifyInstance) {
     return reply.send({
       month,
       exists: monthRow.length > 0,
+      periodStart: period.start,
+      periodEnd: period.end,
       openingSurplus,
       note: monthRow[0]?.note ?? null,
       lines,
@@ -150,7 +182,7 @@ export function registerBudgetRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Starts a month by copying the previous month's budget and savings targets
+   * Starts a period by copying the previous one's budget and savings targets
    * and carrying its closing surplus forward -- the equivalent of duplicating
    * the workbook, minus the duplicating.
    */
@@ -159,14 +191,16 @@ export function registerBudgetRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const month = request.params.month;
       if (!isMonth(month)) return reply.code(400).send({ error: 'month must be YYYY-MM' });
-      const source = request.body?.copyFrom ?? previousMonth(month);
+      const source = request.body?.copyFrom ?? shiftMonth(month, -1);
       if (!isMonth(source)) return reply.code(400).send({ error: 'copyFrom must be YYYY-MM' });
 
+      const rules = await payRules();
+      const period = await boundsFor(month, rules);
+      const sourcePeriod = await boundsFor(source, rules);
       const start = `${month}-01`;
       const sourceStart = `${source}-01`;
 
       await withTransaction(async (client) => {
-        // Carry forward the source month's closing surplus.
         const prior = await client.query<{ opening_surplus: number }>(
           'select opening_surplus from budget_months where month = $1::date',
           [sourceStart],
@@ -176,10 +210,9 @@ export function registerBudgetRoutes(app: FastifyInstance) {
         const sums = await client.query<{ kind: string; total: number }>(
           `select c.kind, coalesce(sum(e.amount), 0) as total
            from entries e join categories c on c.id = e.category_id
-           where e.occurred_on >= $1::date
-             and e.occurred_on < ($1::date + interval '1 month')
+           where e.occurred_on >= $1::date and e.occurred_on < $2::date
            group by c.kind`,
-          [sourceStart],
+          [sourcePeriod.start, sourcePeriod.end],
         );
         const priorIncome = Number(sums.rows.find((r) => r.kind === 'income')?.total ?? 0);
         const priorExpense = Number(sums.rows.find((r) => r.kind === 'expense')?.total ?? 0);
@@ -198,10 +231,13 @@ export function registerBudgetRoutes(app: FastifyInstance) {
           ) / 100;
 
         await client.query(
-          `insert into budget_months (month, opening_surplus)
-           values ($1::date, $2)
-           on conflict (month) do update set opening_surplus = excluded.opening_surplus`,
-          [start, closing],
+          `insert into budget_months (month, opening_surplus, period_start, period_end)
+           values ($1::date, $2, $3::date, $4::date)
+           on conflict (month) do update set
+             opening_surplus = excluded.opening_surplus,
+             period_start = coalesce(budget_months.period_start, excluded.period_start),
+             period_end = coalesce(budget_months.period_end, excluded.period_end)`,
+          [start, closing, period.start, period.end],
         );
 
         await client.query(
@@ -219,7 +255,7 @@ export function registerBudgetRoutes(app: FastifyInstance) {
         );
       });
 
-      return reply.send({ month, initialisedFrom: source });
+      return reply.send({ month, initialisedFrom: source, period });
     },
   );
 
@@ -236,15 +272,19 @@ export function registerBudgetRoutes(app: FastifyInstance) {
     if (!isMonth(month)) return reply.code(400).send({ error: 'month must be YYYY-MM' });
     const start = `${month}-01`;
     const body = request.body ?? {};
+    const rules = await payRules();
+    const period = await boundsFor(month, rules);
 
     await withTransaction(async (client) => {
       await client.query(
-        `insert into budget_months (month, opening_surplus, note)
-         values ($1::date, coalesce($2, 0), $3)
+        `insert into budget_months (month, opening_surplus, note, period_start, period_end)
+         values ($1::date, coalesce($2, 0), $3, $4::date, $5::date)
          on conflict (month) do update set
            opening_surplus = coalesce($2, budget_months.opening_surplus),
-           note = coalesce($3, budget_months.note)`,
-        [start, body.openingSurplus ?? null, body.note ?? null],
+           note = coalesce($3, budget_months.note),
+           period_start = coalesce(budget_months.period_start, excluded.period_start),
+           period_end = coalesce(budget_months.period_end, excluded.period_end)`,
+        [start, body.openingSurplus ?? null, body.note ?? null, period.start, period.end],
       );
 
       for (const line of body.lines ?? []) {
@@ -269,19 +309,44 @@ export function registerBudgetRoutes(app: FastifyInstance) {
       }
     });
 
-    return reply.send({ month, saved: true });
+    return reply.send({ month, saved: true, period });
   });
 
-  /** Month list for the picker, newest first. */
+  /** Period list for the picker, newest first. */
   app.get('/api/months', async (_request, reply) => {
-    const rows = await query(
-      `select to_char(m, 'YYYY-MM') as month from (
-         select distinct date_trunc('month', occurred_on)::date as m from entries
-         union
-         select month from budget_months
-       ) all_months
-       order by m desc`,
+    const rules = await payRules();
+    const bounds = await query<{ earliest: string | null; latest: string | null }>(
+      'select min(occurred_on) as earliest, max(occurred_on) as latest from entries',
     );
-    return reply.send({ months: rows.map((r) => (r as { month: string }).month) });
+    const stored = await query<{ month: string }>(
+      "select to_char(month, 'YYYY-MM') as month from budget_months",
+    );
+
+    const months = new Set(stored.map((row) => row.month));
+    const earliest = bounds[0]?.earliest;
+    const latest = bounds[0]?.latest;
+
+    if (earliest && latest) {
+      const first = periodContaining(String(earliest).slice(0, 10), rules);
+      const last = periodContaining(String(latest).slice(0, 10), rules);
+      let cursor = first.month;
+      for (let guard = 0; guard < 600; guard++) {
+        months.add(cursor);
+        if (cursor === last.month) break;
+        cursor = shiftMonth(cursor, 1);
+      }
+    }
+
+    return reply.send({ months: [...months].sort().reverse() });
+  });
+
+  /** The pay schedule, plus which period today falls in. */
+  app.get('/api/pay-schedule', async (_request, reply) => {
+    const rules = await payRules();
+    const today = new Date();
+    const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
+      today.getDate(),
+    ).padStart(2, '0')}`;
+    return reply.send({ rules, current: periodContaining(iso, rules) });
   });
 }

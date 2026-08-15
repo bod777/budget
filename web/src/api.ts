@@ -77,9 +77,21 @@ export interface SavingsLine {
   sort_order: number;
 }
 
+export interface Period {
+  month: string;
+  /** Inclusive. */
+  start: string;
+  /** Exclusive. */
+  end: string;
+}
+
 export interface MonthView {
   month: string;
   exists: boolean;
+  /** Inclusive start of the payday-to-payday period. */
+  periodStart: string;
+  /** Exclusive end. */
+  periodEnd: string;
   openingSurplus: number;
   note: string | null;
   lines: BudgetLine[];
@@ -234,6 +246,11 @@ export const api = {
     request<{ deleted: number }>(`/api/entries/${id}`, { method: 'DELETE' }),
 
   months: () => request<{ months: string[] }>('/api/months'),
+  paySchedule: () =>
+    request<{
+      rules: { effectiveFrom: string; dayRule: 'last' | number; note: string | null }[];
+      current: Period;
+    }>('/api/pay-schedule'),
   month: (month: string) => request<MonthView>(`/api/months/${month}`),
   initMonth: (month: string) =>
     request<unknown>(`/api/months/${month}/init`, { method: 'POST', body: JSON.stringify({}) }),

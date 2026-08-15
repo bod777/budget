@@ -13,23 +13,58 @@ function monthLabel(month: string): string {
   });
 }
 
-function currentMonth(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-}
-
 function shiftMonth(month: string, delta: number): string {
   const [y, m] = month.split('-').map(Number) as [number, number];
   const date = new Date(y, m - 1 + delta, 1);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
+/**
+ * Periods run payday to payday, so "the current period" is not simply today's
+ * calendar month — after the last payday of the month you are already spending
+ * the next one. The server works it out from the pay schedule.
+ */
+function fallbackMonth(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/** "26 Jun – 30 Jul": the end is exclusive, so show the last day included. */
+function periodLabel(start: string, end: string): string {
+  const fmt = (iso: string) =>
+    new Date(`${iso}T00:00:00`).toLocaleDateString('en-IE', { day: 'numeric', month: 'short' });
+  const lastDay = new Date(`${end}T00:00:00`);
+  lastDay.setDate(lastDay.getDate() - 1);
+  const lastIso = `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(
+    lastDay.getDate(),
+  ).padStart(2, '0')}`;
+  return `${fmt(start)} – ${fmt(lastIso)}`;
+}
+
 export function Dashboard({ reference, refreshKey }: Props) {
-  const [month, setMonth] = useState(currentMonth);
+  const [month, setMonth] = useState(fallbackMonth);
+  const [latestMonth, setLatestMonth] = useState(fallbackMonth);
   const [view, setView] = useState<MonthView | null>(null);
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
+
+  // Land on the period today actually falls in, which after the last payday of
+  // a month is already the next one.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .paySchedule()
+      .then((schedule) => {
+        if (cancelled) return;
+        setLatestMonth(schedule.current.month);
+        setMonth((current) => (current === fallbackMonth() ? schedule.current.month : current));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     api
@@ -103,13 +138,16 @@ export function Dashboard({ reference, refreshKey }: Props) {
         >
           ←
         </button>
-        <strong>{monthLabel(month)}</strong>
+        <span className="center">
+          <strong>{monthLabel(month)}</strong>
+          <div className="small muted">{periodLabel(view.periodStart, view.periodEnd)}</div>
+        </span>
         <button
           type="button"
           className="btn secondary small"
           onClick={() => setMonth(shiftMonth(month, 1))}
-          aria-label="Next month"
-          disabled={month >= currentMonth()}
+          aria-label="Next period"
+          disabled={month >= latestMonth}
         >
           →
         </button>

@@ -46,6 +46,37 @@ Expenses and income share one `entries` table: both forms collected the same
 six fields, so keeping them together makes autocomplete, duplicate detection
 and the monthly rollup one query each rather than two.
 
+### Budget periods
+
+Periods run **payday to payday**, not across the calendar month, matching the
+spreadsheets. A period is named for the month it ends in, and its end is
+exclusive, so the payday that opens a period is counted once — in the period it
+funds.
+
+Payday is the nominal day moved back to the previous working day when it lands
+on a weekend or an Irish bank holiday. The nominal day is stored in
+`pay_schedule` and has already changed once:
+
+| From | Rule | |
+|---|---|---|
+| 2000-01 | 28th of the month | Employer A |
+| 2026-07 | last day of the month | Employer B |
+
+So the July 2026 period ran 26 Jun – 30 Jul: the 28th of June was a Sunday, so
+pay landed on Friday the 26th. August ran 31 Jul – 30 Aug.
+
+Bank holidays are computed rather than listed (`src/lib/irish-holidays.ts`),
+including Easter and the substitute weekdays taken when a fixed-date holiday
+falls at a weekend — which matters, because a Saturday Christmas pushes a
+bank holiday onto 28 December.
+
+Getting this wrong is not cosmetic: with calendar months the salary paid on
+31 July lands in July, and August shows €120.00 of income instead of €4,000.00.
+
+When the pay schedule changes again, add a row to `pay_schedule`. Periods
+already started keep the boundaries stored on `budget_months`, so editing the
+schedule cannot retroactively move a period you have already closed off.
+
 ### The surplus chain
 
 Reproduced from the workbook and verified against August 2026, where an
