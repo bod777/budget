@@ -12,6 +12,7 @@ import { registerReferenceRoutes } from './routes/reference.ts';
 import { registerEntryRoutes } from './routes/entries.ts';
 import { registerSuggestRoutes } from './routes/suggest.ts';
 import { registerBudgetRoutes } from './routes/budget.ts';
+import { registerPayScheduleRoutes } from './routes/pay-schedule.ts';
 import { registerRecurringRoutes, generatePending } from './routes/recurring.ts';
 import { pool } from './db.ts';
 
@@ -37,6 +38,7 @@ registerReferenceRoutes(app);
 registerEntryRoutes(app);
 registerSuggestRoutes(app);
 registerBudgetRoutes(app);
+registerPayScheduleRoutes(app);
 registerRecurringRoutes(app);
 
 if (existsSync(webDist)) {

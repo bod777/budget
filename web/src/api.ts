@@ -77,6 +77,14 @@ export interface SavingsLine {
   sort_order: number;
 }
 
+export interface PayRuleRow {
+  id: number;
+  /** YYYY-MM, the first month this rule applies to. */
+  effectiveFrom: string;
+  dayRule: 'last' | number;
+  note: string | null;
+}
+
 export interface Period {
   month: string;
   /** Inclusive. */
@@ -248,9 +256,30 @@ export const api = {
   months: () => request<{ months: string[] }>('/api/months'),
   paySchedule: () =>
     request<{
-      rules: { effectiveFrom: string; dayRule: 'last' | number; note: string | null }[];
-      current: Period;
+      rules: PayRuleRow[];
+      current: Period | null;
+      preview: { month: string; start: string; end: string; isCurrent: boolean }[];
     }>('/api/pay-schedule'),
+  createPayRule: (payload: { effectiveFrom: string; dayRule: 'last' | number; note: string | null }) =>
+    request<{ id: number }>('/api/pay-schedule', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updatePayRule: (
+    id: number,
+    payload: { effectiveFrom: string; dayRule: 'last' | number; note: string | null },
+  ) =>
+    request<{ updated: number }>(`/api/pay-schedule/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deletePayRule: (id: number) =>
+    request<{ deleted: number }>(`/api/pay-schedule/${id}`, { method: 'DELETE' }),
+  rederivePeriods: (from?: string) =>
+    request<{ rederived: number }>('/api/pay-schedule/rederive', {
+      method: 'POST',
+      body: JSON.stringify(from ? { from } : {}),
+    }),
   month: (month: string) => request<MonthView>(`/api/months/${month}`),
   initMonth: (month: string) =>
     request<unknown>(`/api/months/${month}/init`, { method: 'POST', body: JSON.stringify({}) }),

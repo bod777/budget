@@ -340,13 +340,4 @@ export function registerBudgetRoutes(app: FastifyInstance) {
     return reply.send({ months: [...months].sort().reverse() });
   });
 
-  /** The pay schedule, plus which period today falls in. */
-  app.get('/api/pay-schedule', async (_request, reply) => {
-    const rules = await payRules();
-    const today = new Date();
-    const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
-      today.getDate(),
-    ).padStart(2, '0')}`;
-    return reply.send({ rules, current: periodContaining(iso, rules) });
-  });
 }

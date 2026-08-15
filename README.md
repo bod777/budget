@@ -73,9 +73,14 @@ bank holiday onto 28 December.
 Getting this wrong is not cosmetic: with calendar months the salary paid on
 31 July lands in July, and August shows €120.00 of income instead of €4,000.00.
 
-When the pay schedule changes again, add a row to `pay_schedule`. Periods
-already started keep the boundaries stored on `budget_months`, so editing the
-schedule cannot retroactively move a period you have already closed off.
+The schedule is editable in the app under **Settings** (the gear in the top
+bar): add a rule when your pay date changes, and a preview shows the periods it
+produces before anything depends on them.
+
+Periods already started keep the boundaries stored on `budget_months`, so
+editing the schedule cannot retroactively move a period you have already closed
+off. "Recalculate past periods" in Settings drops those pinned dates when you
+do want history to follow the current rules.
 
 ### The surplus chain
 

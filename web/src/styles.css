@@ -162,6 +162,7 @@ h2 {
 
 input[type='text'],
 input[type='date'],
+input[type='month'],
 input[type='password'],
 input[inputmode='decimal'],
 select,
@@ -616,6 +617,132 @@ button:focus-visible {
   text-decoration: underline;
   cursor: pointer;
   padding: 4px;
+}
+
+/* ---- editable rows and sheets ---- */
+
+.icon-button {
+  appearance: none;
+  min-width: 40px;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.icon-button[aria-pressed='true'] {
+  background: var(--surface-2);
+}
+
+/* A history row is a button, so the whole row is one large tap target. */
+.row-button {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  gap: 10px;
+}
+
+.row-button:last-child {
+  border-bottom: 0;
+}
+
+.row-button:active {
+  background: var(--surface-2);
+}
+
+.chev {
+  color: var(--text-dim);
+  font-size: 18px;
+}
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgb(0 0 0 / 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.sheet {
+  width: min(640px, 100%);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+  box-shadow: var(--shadow);
+}
+
+.sheet-head,
+.sheet-foot {
+  padding: 12px 16px;
+  background: var(--surface);
+}
+
+.sheet-head {
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.sheet-foot {
+  border-top: 1px solid var(--border);
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+
+.sheet-body {
+  padding: 14px 16px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (min-width: 640px) {
+  .sheet-backdrop {
+    align-items: center;
+  }
+  .sheet {
+    border-radius: var(--radius);
+  }
+}
+
+.rule-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  align-items: end;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rule-row:last-of-type {
+  border-bottom: 0;
+}
+
+.rule-note {
+  grid-column: 1 / -1;
+}
+
+.badge-soft {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .muted {

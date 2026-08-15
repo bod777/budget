@@ -4,6 +4,7 @@ import { EntryForm } from './components/EntryForm.tsx';
 import { Dashboard } from './components/Dashboard.tsx';
 import { History } from './components/History.tsx';
 import { Recurring } from './components/Recurring.tsx';
+import { PaySchedule } from './components/PaySchedule.tsx';
 
 type Tab = 'add' | 'month' | 'history' | 'auto';
 
@@ -133,6 +134,7 @@ export function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
   const [toast, setToast] = useState<Toast | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const refresh = useCallback(() => setRefreshKey((key) => key + 1), []);
 
@@ -176,19 +178,32 @@ export function App() {
   return (
     <>
       <div className="app">
-        <div className="topbar">
+        <div className="topbar spread">
           <h1>
-            {tab === 'add'
-              ? 'Add'
-              : tab === 'month'
-                ? 'This month'
-                : tab === 'history'
-                  ? 'History'
-                  : 'Recurring'}
+            {settingsOpen
+              ? 'Settings'
+              : tab === 'add'
+                ? 'Add'
+                : tab === 'month'
+                  ? 'This month'
+                  : tab === 'history'
+                    ? 'History'
+                    : 'Recurring'}
           </h1>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={settingsOpen ? 'Close settings' : 'Settings'}
+            aria-pressed={settingsOpen}
+            onClick={() => setSettingsOpen((open) => !open)}
+          >
+            {settingsOpen ? '✕' : '⚙'}
+          </button>
         </div>
 
-        {tab === 'add' && (
+        {settingsOpen && <PaySchedule toast={showToast} onChanged={refresh} />}
+
+        {!settingsOpen && tab === 'add' && (
           <>
             {pendingCount > 0 && (
               <div className="banner info">
@@ -207,13 +222,13 @@ export function App() {
           </>
         )}
 
-        {tab === 'month' && <Dashboard reference={reference} refreshKey={refreshKey} />}
+        {!settingsOpen && tab === 'month' && <Dashboard reference={reference} refreshKey={refreshKey} />}
 
-        {tab === 'history' && (
+        {!settingsOpen && tab === 'history' && (
           <History reference={reference} refreshKey={refreshKey} onChanged={refresh} />
         )}
 
-        {tab === 'auto' && (
+        {!settingsOpen && tab === 'auto' && (
           <Recurring reference={reference} onChanged={refresh} toast={showToast} />
         )}
       </div>
@@ -241,7 +256,10 @@ export function App() {
             key={item.id}
             type="button"
             aria-current={tab === item.id ? 'page' : undefined}
-            onClick={() => setTab(item.id)}
+            onClick={() => {
+              setSettingsOpen(false);
+              setTab(item.id);
+            }}
           >
             <span className="glyph" aria-hidden="true">
               {item.glyph}

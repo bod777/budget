@@ -7,6 +7,7 @@ import {
   type Kind,
   type Reference,
 } from '../api.ts';
+import { EntryEditor } from './EntryEditor.tsx';
 
 interface Props {
   reference: Reference;
@@ -19,6 +20,8 @@ export function History({ reference, refreshKey, onChanged }: Props) {
   const [search, setSearch] = useState('');
   const [kind, setKind] = useState<Kind | 'all'>('all');
   const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<Entry | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     setLoading(true);
@@ -34,7 +37,7 @@ export function History({ reference, refreshKey, onChanged }: Props) {
         .finally(() => setLoading(false));
     }, 200);
     return () => clearTimeout(timer);
-  }, [search, kind, refreshKey]);
+  }, [search, kind, refreshKey, reloadKey]);
 
   const money = (value: number) => formatMoney(value, reference.currency, reference.locale);
 
@@ -48,12 +51,6 @@ export function History({ reference, refreshKey, onChanged }: Props) {
     }
     return [...map.entries()];
   }, [entries]);
-
-  async function remove(entry: Entry) {
-    await api.deleteEntry(entry.id);
-    setEntries((list) => list.filter((e) => e.id !== entry.id));
-    onChanged();
-  }
 
   return (
     <div>
@@ -96,7 +93,13 @@ export function History({ reference, refreshKey, onChanged }: Props) {
             </h2>
             <div className="card">
               {list.map((entry) => (
-                <div className="session-item" key={entry.id}>
+                <button
+                  type="button"
+                  className="session-item row-button"
+                  key={entry.id}
+                  aria-label={`Edit ${entry.description}`}
+                  onClick={() => setEditing(entry)}
+                >
                   <span className="desc">
                     {entry.description}
                     <div className="meta">
@@ -104,26 +107,40 @@ export function History({ reference, refreshKey, onChanged }: Props) {
                         .filter(Boolean)
                         .join(' · ')}
                       {entry.source === 'recurring' ? ' · auto' : ''}
+                      {entry.note ? ' · needs attention' : ''}
                     </div>
                   </span>
                   <span className={`money ${entry.kind === 'income' ? 'pos' : ''}`}>
                     {entry.kind === 'income' ? '+' : ''}
                     {money(entry.amount)}
                   </span>
-                  <button
-                    type="button"
-                    className="btn secondary small"
-                    aria-label={`Delete ${entry.description}`}
-                    onClick={() => void remove(entry)}
-                  >
-                    ✕
-                  </button>
-                </div>
+                  <span className="chev" aria-hidden="true">
+                    ›
+                  </span>
+                </button>
               ))}
             </div>
           </div>
         );
       })}
+
+      {editing && (
+        <EntryEditor
+          entry={editing}
+          reference={reference}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            setReloadKey((key) => key + 1);
+            onChanged();
+          }}
+          onDeleted={() => {
+            setEditing(null);
+            setReloadKey((key) => key + 1);
+            onChanged();
+          }}
+        />
+      )}
     </div>
   );
 }

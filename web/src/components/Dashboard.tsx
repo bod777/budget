@@ -56,9 +56,10 @@ export function Dashboard({ reference, refreshKey }: Props) {
     api
       .paySchedule()
       .then((schedule) => {
-        if (cancelled) return;
-        setLatestMonth(schedule.current.month);
-        setMonth((current) => (current === fallbackMonth() ? schedule.current.month : current));
+        if (cancelled || !schedule.current) return;
+        const current = schedule.current;
+        setLatestMonth(current.month);
+        setMonth((existing) => (existing === fallbackMonth() ? current.month : existing));
       })
       .catch(() => {});
     return () => {
