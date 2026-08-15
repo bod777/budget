@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { query } from '../db.ts';
+import { normaliseKey } from '../lib/text.ts';
 
 /**
  * Autocomplete is built from the shape of the history rather than a hand-kept
@@ -75,6 +76,21 @@ const TEMPLATE_SQL = `
   limit $4::int
 `;
 
+export function templateKey(t: {
+  description: string;
+  counterparty_id: number | null;
+  category_id: number;
+}): string {
+  return `${normaliseKey(t.description)}|${t.counterparty_id ?? ''}|${t.category_id}`;
+}
+
+interface QuickPickRow {
+  template_key: string;
+  pinned: boolean;
+  hidden: boolean;
+  sort_order: number;
+}
+
 export function registerSuggestRoutes(app: FastifyInstance) {
   app.get<{
     Querystring: { kind?: string; q?: string; limit?: string; windowDays?: string };
@@ -90,9 +106,12 @@ export function registerSuggestRoutes(app: FastifyInstance) {
   });
 
   /**
-   * The zero-typing path: the handful of things logged often enough to deserve
-   * a single tap. Restricted to templates with a stable amount, because a chip
-   * that fills in the wrong number is worse than no chip.
+   * The zero-typing path: the handful of things worth a single tap.
+   *
+   * Pinned choices come first and always show. The rest is filled
+   * automatically from what repeats with a stable amount -- a button that
+   * fills in the wrong number is worse than no button -- skipping anything
+   * explicitly hidden.
    */
   app.get<{ Querystring: { kind?: string; limit?: string } }>(
     '/api/suggest/quick',
@@ -100,14 +119,96 @@ export function registerSuggestRoutes(app: FastifyInstance) {
       const kind = request.query.kind === 'income' ? 'income' : 'expense';
       const limit = Math.min(Math.max(Number(request.query.limit ?? 8), 1), 20);
 
-      const rows = await query(
-        `select * from (${TEMPLATE_SQL}) t
-         where t.uses >= 3 and t.amount_varies = false
-         order by t.score desc
-         limit $5::int`,
-        [kind, 365, '', 60, limit],
+      const [candidates, overrides] = await Promise.all([
+        query(TEMPLATE_SQL, [kind, 400, '', 80]),
+        query<QuickPickRow>(
+          'select template_key, pinned, hidden, sort_order from quick_picks where kind = $1',
+          [kind],
+        ),
+      ]);
+
+      const byKey = new Map(overrides.map((row) => [row.template_key, row]));
+      const withKeys = (candidates as Record<string, never>[]).map((t) => ({
+        template: t,
+        key: templateKey(t as never),
+      }));
+
+      const pinned = withKeys
+        .filter((c) => byKey.get(c.key)?.pinned)
+        .sort((a, b) => (byKey.get(a.key)?.sort_order ?? 0) - (byKey.get(b.key)?.sort_order ?? 0));
+
+      const auto = withKeys.filter((c) => {
+        const override = byKey.get(c.key);
+        if (override?.pinned || override?.hidden) return false;
+        const t = c.template as unknown as { uses: number; amount_varies: boolean };
+        return t.uses >= 3 && !t.amount_varies;
+      });
+
+      return reply.send({
+        quick: [...pinned, ...auto].slice(0, limit).map((c) => ({ ...c.template, key: c.key })),
+      });
+    },
+  );
+
+  /** Everything that could be a one-tap button, with its current choice. */
+  app.get<{ Querystring: { kind?: string } }>(
+    '/api/suggest/quick/options',
+    async (request, reply) => {
+      const kind = request.query.kind === 'income' ? 'income' : 'expense';
+      const [candidates, overrides] = await Promise.all([
+        query(TEMPLATE_SQL, [kind, 400, '', 60]),
+        query<QuickPickRow>(
+          'select template_key, pinned, hidden, sort_order from quick_picks where kind = $1',
+          [kind],
+        ),
+      ]);
+      const byKey = new Map(overrides.map((row) => [row.template_key, row]));
+
+      return reply.send({
+        options: (candidates as Record<string, never>[]).map((t) => {
+          const key = templateKey(t as never);
+          const override = byKey.get(key);
+          const template = t as unknown as { uses: number; amount_varies: boolean };
+          return {
+            ...t,
+            key,
+            pinned: override?.pinned ?? false,
+            hidden: override?.hidden ?? false,
+            // Whether it would appear on its own, with no choice recorded.
+            automatic: template.uses >= 3 && !template.amount_varies,
+          };
+        }),
+      });
+    },
+  );
+
+  app.put<{ Body: { key?: string; kind?: string; pinned?: boolean; hidden?: boolean } }>(
+    '/api/suggest/quick',
+    async (request, reply) => {
+      const key = (request.body?.key ?? '').trim();
+      if (key === '') return reply.code(400).send({ error: 'key is required' });
+      const kind = request.body?.kind === 'income' ? 'income' : 'expense';
+      const pinned = request.body?.pinned === true;
+      const hidden = request.body?.hidden === true;
+      if (pinned && hidden) {
+        return reply.code(400).send({ error: 'a button cannot be both pinned and hidden' });
+      }
+
+      // No choice recorded means "behave automatically", so clearing both
+      // removes the row rather than storing two falses.
+      if (!pinned && !hidden) {
+        await query('delete from quick_picks where template_key = $1', [key]);
+        return reply.send({ key, pinned: false, hidden: false });
+      }
+
+      await query(
+        `insert into quick_picks (template_key, kind, pinned, hidden, sort_order)
+         values ($1, $2, $3, $4, coalesce((select max(sort_order) + 1 from quick_picks), 0))
+         on conflict (template_key) do update set
+           pinned = excluded.pinned, hidden = excluded.hidden, kind = excluded.kind`,
+        [key, kind, pinned, hidden],
       );
-      return reply.send({ quick: rows });
+      return reply.send({ key, pinned, hidden });
     },
   );
 

@@ -56,6 +56,14 @@ export interface Template {
   score: number;
 }
 
+export interface QuickPickOption extends Template {
+  key: string;
+  pinned: boolean;
+  hidden: boolean;
+  /** Whether it would appear with no choice recorded. */
+  automatic: boolean;
+}
+
 export interface Entry {
   id: number;
   kind: Kind;
@@ -245,8 +253,15 @@ export const api = {
     request<{ templates: Template[] }>(
       `/api/suggest?kind=${kind}&q=${encodeURIComponent(q)}&limit=${limit}`,
     ),
-  quick: (kind: Kind, limit = 8) =>
+  quick: (kind: SpendKind, limit = 8) =>
     request<{ quick: Template[] }>(`/api/suggest/quick?kind=${kind}&limit=${limit}`),
+  quickOptions: (kind: SpendKind) =>
+    request<{ options: QuickPickOption[] }>(`/api/suggest/quick/options?kind=${kind}`),
+  setQuickPick: (payload: { key: string; kind: SpendKind; pinned: boolean; hidden: boolean }) =>
+    request<{ key: string }>('/api/suggest/quick', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
   counterparties: (kind: Kind, q: string, limit = 8) =>
     request<{ counterparties: { id: number; name: string; uses: number }[] }>(
       `/api/suggest/counterparties?kind=${kind}&q=${encodeURIComponent(q)}&limit=${limit}`,

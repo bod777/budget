@@ -12,6 +12,7 @@ import {
   type Template,
 } from '../api.ts';
 import { Autocomplete } from './Autocomplete.tsx';
+import { QuickPicks } from './QuickPicks.tsx';
 
 interface Props {
   reference: Reference;
@@ -58,6 +59,8 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
   // Entries added in this sitting. Batch entry is the normal case, so showing
   // the running list makes it obvious where you are in a bank statement.
   const [session, setSession] = useState<Entry[]>([]);
+  const [choosingQuick, setChoosingQuick] = useState(false);
+  const [quickKey, setQuickKey] = useState(0);
 
   const amountRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
@@ -89,7 +92,7 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
       .quick(spendKind, 8)
       .then((r) => setQuick(r.quick))
       .catch(() => setQuick([]));
-  }, [spendKind, isTransfer, session.length]);
+  }, [spendKind, isTransfer, session.length, quickKey]);
 
   // Live duplicate check. Transfers between your own accounts are legitimately
   // repetitive, so they are left out of it.
@@ -244,9 +247,18 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
         </p>
       )}
 
-      {quick.length > 0 && draft.description === '' && (
+      {!isTransfer && draft.description === '' && (
         <>
-          <h2>One tap</h2>
+          <div className="spread">
+            <h2 style={{ marginBottom: 8 }}>One tap</h2>
+            <button
+              type="button"
+              className="btn secondary small"
+              onClick={() => setChoosingQuick(true)}
+            >
+              Choose
+            </button>
+          </div>
           <div className="chips">
             {quick.map((template) => (
               <button
@@ -263,6 +275,15 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
             ))}
           </div>
         </>
+      )}
+
+      {choosingQuick && (
+        <QuickPicks
+          kind={spendKind}
+          reference={reference}
+          onClose={() => setChoosingQuick(false)}
+          onChanged={() => setQuickKey((k) => k + 1)}
+        />
       )}
 
       <h2>Details</h2>

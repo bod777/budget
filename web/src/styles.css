@@ -745,6 +745,16 @@ button:focus-visible {
   font-weight: 600;
 }
 
+.quick-option {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+
+.quick-option:last-child {
+  border-bottom: 0;
+}
+
 .muted {
   color: var(--text-dim);
 }
