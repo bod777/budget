@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, formatMoney, type MonthView, type Reference } from '../api.ts';
+import { Accounts } from './Accounts.tsx';
 
 interface Props {
   reference: Reference;
@@ -190,6 +191,12 @@ export function Dashboard({ reference, refreshKey }: Props) {
           <div className="small muted">opened at {money(view.openingSurplus)}</div>
         </div>
       </div>
+
+      <div className="spread" style={{ marginTop: 22 }}>
+        <h2 style={{ margin: 0 }}>Balances</h2>
+        <span className="small muted">right now</span>
+      </div>
+      <Accounts reference={reference} refreshKey={refreshKey} compact />
 
       {!view.exists && (
         <div className="banner info" style={{ marginTop: 14 }}>

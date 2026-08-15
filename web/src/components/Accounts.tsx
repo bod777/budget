@@ -63,6 +63,12 @@ export function Accounts({ reference, refreshKey, compact = false, toast }: Prop
 
   const unset = accounts.filter((a) => a.needsOpeningBalance);
 
+  const known = accounts.filter((a) => a.balance !== null);
+  const assets = known.reduce((total, a) => total + Math.max(a.balance ?? 0, 0), 0);
+  const owed = known.reduce((total, a) => total + Math.max(-(a.balance ?? 0), 0), 0);
+  const net = Math.round((assets - owed) * 100) / 100;
+  const complete = unset.length === 0;
+
   return (
     <div>
       {!compact && savingsTotal !== null && (
@@ -180,6 +186,20 @@ export function Accounts({ reference, refreshKey, compact = false, toast }: Prop
                 </td>
               </tr>
             ))}
+            {known.length > 0 && (
+              <tr className="total">
+                <td>
+                  Net position
+                  {!complete && <div className="small muted">excludes accounts without a balance</div>}
+                </td>
+                <td className="num">
+                  <span className={`money ${net < 0 ? 'neg' : ''}`}>{money(net)}</span>
+                  {owed > 0 && (
+                    <div className="small muted">{money(assets)} less {money(owed)} owed</div>
+                  )}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
