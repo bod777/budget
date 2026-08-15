@@ -8,7 +8,6 @@ import {
   type Reference,
 } from '../api.ts';
 import { EntryEditor } from './EntryEditor.tsx';
-import { Trends } from './Trends.tsx';
 
 interface Props {
   reference: Reference;
@@ -55,9 +54,6 @@ export function History({ reference, refreshKey, onChanged }: Props) {
 
   return (
     <div>
-      <Trends reference={reference} refreshKey={refreshKey} />
-
-      <h2>Entries</h2>
       <div className="field">
         <input
           type="text"
@@ -69,14 +65,20 @@ export function History({ reference, refreshKey, onChanged }: Props) {
       </div>
 
       <div className="segmented" role="group" aria-label="Filter by type">
-        {(['all', 'expense', 'income'] as const).map((option) => (
+        {(['all', 'expense', 'income', 'transfer'] as const).map((option) => (
           <button
             key={option}
             type="button"
             aria-pressed={kind === option}
             onClick={() => setKind(option)}
           >
-            {option === 'all' ? 'All' : option === 'expense' ? 'Expenses' : 'Income'}
+            {option === 'all'
+              ? 'All'
+              : option === 'expense'
+                ? 'Expenses'
+                : option === 'income'
+                  ? 'Income'
+                  : 'Transfers'}
           </button>
         ))}
       </div>
@@ -86,7 +88,10 @@ export function History({ reference, refreshKey, onChanged }: Props) {
 
       {days.map(([day, list]) => {
         const total = list.reduce(
-          (sum, entry) => sum + (entry.kind === 'expense' ? entry.amount : -entry.amount),
+          (sum, entry) =>
+            entry.kind === 'transfer'
+              ? sum
+              : sum + (entry.kind === 'expense' ? entry.amount : -entry.amount),
           0,
         );
         return (
@@ -107,14 +112,20 @@ export function History({ reference, refreshKey, onChanged }: Props) {
                   <span className="desc">
                     {entry.description}
                     <div className="meta">
-                      {[entry.counterparty, entry.category, entry.account]
-                        .filter(Boolean)
-                        .join(' · ')}
+                      {entry.kind === 'transfer'
+                        ? `${entry.account ?? '?'} → ${entry.toAccount ?? '?'}`
+                        : [entry.counterparty, entry.category, entry.account]
+                            .filter(Boolean)
+                            .join(' · ')}
                       {entry.source === 'recurring' ? ' · auto' : ''}
                       {entry.note ? ' · needs attention' : ''}
                     </div>
                   </span>
-                  <span className={`money ${entry.kind === 'income' ? 'pos' : ''}`}>
+                  <span
+                    className={`money ${entry.kind === 'income' ? 'pos' : ''} ${
+                      entry.kind === 'transfer' ? 'muted' : ''
+                    }`}
+                  >
                     {entry.kind === 'income' ? '+' : ''}
                     {money(entry.amount)}
                   </span>

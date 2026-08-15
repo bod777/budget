@@ -150,7 +150,11 @@ export function registerEntryRoutes(app: FastifyInstance) {
     const conditions: string[] = [];
     const params: unknown[] = [];
 
-    if (request.query.kind === 'expense' || request.query.kind === 'income') {
+    if (
+      request.query.kind === 'expense' ||
+      request.query.kind === 'income' ||
+      request.query.kind === 'transfer'
+    ) {
       params.push(request.query.kind);
       conditions.push(`e.kind = $${params.length}`);
     }
@@ -169,7 +173,7 @@ export function registerEntryRoutes(app: FastifyInstance) {
     if (request.query.search) {
       params.push(`%${request.query.search.toLowerCase()}%`);
       conditions.push(
-        `(lower(e.description) like $${params.length} or lower(cp.name) like $${params.length})`,
+        `(lower(e.description) like $${params.length} or lower(coalesce(cp.name, '')) like $${params.length})`,
       );
     }
 

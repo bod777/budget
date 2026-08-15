@@ -4,13 +4,15 @@ import { EntryForm } from './components/EntryForm.tsx';
 import { Dashboard } from './components/Dashboard.tsx';
 import { History } from './components/History.tsx';
 import { Recurring } from './components/Recurring.tsx';
+import { Trends } from './components/Trends.tsx';
 import { PaySchedule } from './components/PaySchedule.tsx';
 
-type Tab = 'add' | 'month' | 'history' | 'auto';
+type Tab = 'add' | 'month' | 'trends' | 'history' | 'auto';
 
 const TABS: { id: Tab; label: string; glyph: string }[] = [
   { id: 'add', label: 'Add', glyph: '＋' },
   { id: 'month', label: 'Month', glyph: '◒' },
+  { id: 'trends', label: 'Trends', glyph: '↗' },
   { id: 'history', label: 'History', glyph: '☰' },
   { id: 'auto', label: 'Recurring', glyph: '↻' },
 ];
@@ -186,9 +188,11 @@ export function App() {
                 ? 'Add'
                 : tab === 'month'
                   ? 'This month'
-                  : tab === 'history'
-                    ? 'History'
-                    : 'Recurring'}
+                  : tab === 'trends'
+                    ? 'Trends'
+                    : tab === 'history'
+                      ? 'History'
+                      : 'Recurring'}
           </h1>
           <button
             type="button"
@@ -230,6 +234,10 @@ export function App() {
         )}
 
         {!settingsOpen && tab === 'month' && <Dashboard reference={reference} refreshKey={refreshKey} />}
+
+        {!settingsOpen && tab === 'trends' && (
+          <Trends reference={reference} refreshKey={refreshKey} />
+        )}
 
         {!settingsOpen && tab === 'history' && (
           <History reference={reference} refreshKey={refreshKey} onChanged={refresh} />
