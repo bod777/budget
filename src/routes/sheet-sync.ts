@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { query } from '../db.ts';
 import { env } from '../env.ts';
 import { ensureTabs, formatHeaders, replaceTab, type CellValue } from '../lib/sheets.ts';
-import { periodContaining, periodFor, shiftMonth, type PayRule } from '../lib/pay-periods.ts';
+import { periodContaining, periodFor, shiftMonth } from '../lib/pay-periods.ts';
+import { loadSchedule, type Schedule } from './pay-schedule.ts';
 
 /**
  * One-way mirror of the database into a Google Sheet.
@@ -36,15 +37,7 @@ interface EntryRow {
   logged_at: string;
 }
 
-export async function payRules(): Promise<PayRule[]> {
-  const rows = await query<{ effective_from: string; day_rule: string }>(
-    'select effective_from, day_rule from pay_schedule order by effective_from',
-  );
-  return rows.map((row) => ({
-    effectiveFrom: String(row.effective_from).slice(0, 10),
-    dayRule: row.day_rule === 'last' ? 'last' : Number(row.day_rule),
-  }));
-}
+export { loadSchedule };
 
 function iso(value: unknown): string {
   return String(value).slice(0, 10);
@@ -65,7 +58,10 @@ function timestamp(value: unknown): string {
   );
 }
 
-export async function entryRows(kind: 'expense' | 'income', rules: PayRule[]): Promise<CellValue[][]> {
+export async function entryRows(
+  kind: 'expense' | 'income',
+  { rules, overrides }: Schedule,
+): Promise<CellValue[][]> {
   const rows = await query<EntryRow>(
     `select e.occurred_on, e.description, cp.name as counterparty, e.amount,
             cat.name as category, cat.bucket, ch.name as account, e.note,
@@ -105,7 +101,7 @@ export async function entryRows(kind: 'expense' | 'income', rules: PayRule[]): P
       row.category,
       ...(kind === 'expense' ? [row.bucket ?? ''] : []),
       row.account ?? '',
-      periodContaining(date, rules).month,
+      periodContaining(date, rules, overrides).month,
       row.note ?? '',
       row.source,
       timestamp(row.logged_at),
@@ -115,7 +111,7 @@ export async function entryRows(kind: 'expense' | 'income', rules: PayRule[]): P
   return [header, ...body];
 }
 
-export async function transferRows(rules: PayRule[]): Promise<CellValue[][]> {
+export async function transferRows({ rules, overrides }: Schedule): Promise<CellValue[][]> {
   const rows = await query<{
     occurred_on: string;
     description: string;
@@ -150,7 +146,7 @@ export async function transferRows(rules: PayRule[]): Promise<CellValue[][]> {
         row.from_name ?? '',
         row.to_name ?? '',
         Number(row.amount),
-        periodContaining(date, rules).month,
+        periodContaining(date, rules, overrides).month,
         row.note ?? '',
         row.source,
         timestamp(row.logged_at),
@@ -208,7 +204,7 @@ export async function balanceRows(): Promise<CellValue[][]> {
   ];
 }
 
-export async function periodRows(rules: PayRule[]): Promise<CellValue[][]> {
+export async function periodRows({ rules, overrides }: Schedule): Promise<CellValue[][]> {
   const bounds = await query<{ earliest: string | null; latest: string | null }>(
     'select min(occurred_on) as earliest, max(occurred_on) as latest from entries',
   );
@@ -238,7 +234,7 @@ export async function periodRows(rules: PayRule[]): Promise<CellValue[][]> {
   // Bucket daily totals into periods rather than issuing a query per period.
   const byPeriod = new Map<string, { expense: number; income: number }>();
   for (const row of totals) {
-    const month = periodContaining(row.month_key, rules).month;
+    const month = periodContaining(row.month_key, rules, overrides).month;
     const bucket = byPeriod.get(month) ?? { expense: 0, income: 0 };
     if (row.kind === 'expense') bucket.expense += Number(row.total);
     else bucket.income += Number(row.total);
@@ -258,7 +254,7 @@ export async function periodRows(rules: PayRule[]): Promise<CellValue[][]> {
   );
   const savingsByMonth = new Map<string, number>();
   for (const row of savingsMoves) {
-    const month = periodContaining(iso(row.occurred_on), rules).month;
+    const month = periodContaining(iso(row.occurred_on), rules, overrides).month;
     savingsByMonth.set(month, (savingsByMonth.get(month) ?? 0) + Number(row.total));
   }
 
@@ -267,13 +263,13 @@ export async function periodRows(rules: PayRule[]): Promise<CellValue[][]> {
   );
   const openingByMonth = new Map(opening.map((r) => [r.month, Number(r.opening_surplus)]));
 
-  const first = periodContaining(iso(earliest), rules).month;
-  const last = periodContaining(iso(latest), rules).month;
+  const first = periodContaining(iso(earliest), rules, overrides).month;
+  const last = periodContaining(iso(latest), rules, overrides).month;
 
   const body: CellValue[][] = [];
   let cursor = first;
   for (let guard = 0; guard < 600; guard++) {
-    const period = periodFor(cursor, rules);
+    const period = periodFor(cursor, rules, overrides);
     const bucket = byPeriod.get(cursor) ?? { expense: 0, income: 0 };
     const savingsActual = savingsByMonth.get(cursor) ?? 0;
     const openingSurplus = openingByMonth.get(cursor) ?? 0;
@@ -313,13 +309,13 @@ export async function runSheetSync(): Promise<{
   const spreadsheetId = env.sheets.spreadsheetId;
   if (!key || !spreadsheetId) throw new Error('Google Sheets mirroring is not configured');
 
-  const rules = await payRules();
+  const schedule = await loadSchedule();
   const [expenses, income, transfers, balances, periods] = await Promise.all([
-    entryRows('expense', rules),
-    entryRows('income', rules),
-    transferRows(rules),
+    entryRows('expense', schedule),
+    entryRows('income', schedule),
+    transferRows(schedule),
     balanceRows(),
-    periodRows(rules),
+    periodRows(schedule),
   ]);
 
   await ensureTabs(key, spreadsheetId, TABS);

@@ -4,13 +4,13 @@
  *
  *   npm run preview-sheet
  */
-import { entryRows, periodRows, payRules } from '../src/routes/sheet-sync.ts';
+import { entryRows, periodRows, loadSchedule } from '../src/routes/sheet-sync.ts';
 import { pool } from '../src/db.ts';
 
-const rules = await payRules();
-const expenses = await entryRows('expense', rules);
-const income = await entryRows('income', rules);
-const periods = await periodRows(rules);
+const schedule = await loadSchedule();
+const expenses = await entryRows('expense', schedule);
+const income = await entryRows('income', schedule);
+const periods = await periodRows(schedule);
 
 function show(name: string, rows: unknown[][], limit: number) {
   console.log(`\n=== ${name} (${rows.length - 1} data rows) ===`);

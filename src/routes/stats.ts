@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { query } from '../db.ts';
-import { periodContaining, periodFor, shiftMonth, type PayRule } from '../lib/pay-periods.ts';
+import { periodContaining, periodFor, shiftMonth } from '../lib/pay-periods.ts';
+import { loadSchedule } from './pay-schedule.ts';
 
 /**
  * Aggregates for the history charts.
@@ -9,16 +10,6 @@ import { periodContaining, periodFor, shiftMonth, type PayRule } from '../lib/pa
  * numbers here agree with the dashboard rather than telling a slightly
  * different story.
  */
-
-async function payRules(): Promise<PayRule[]> {
-  const rows = await query<{ effective_from: string; day_rule: string }>(
-    'select effective_from, day_rule from pay_schedule order by effective_from',
-  );
-  return rows.map((row) => ({
-    effectiveFrom: String(row.effective_from).slice(0, 10),
-    dayRule: row.day_rule === 'last' ? 'last' : Number(row.day_rule),
-  }));
-}
 
 function iso(value: unknown): string {
   return String(value).slice(0, 10);
@@ -35,7 +26,7 @@ export function registerStatsRoutes(app: FastifyInstance) {
   /** Spending and income for each of the last N periods, oldest first. */
   app.get<{ Querystring: { limit?: string } }>('/api/stats/periods', async (request, reply) => {
     const limit = Math.min(Math.max(Number(request.query.limit ?? 12), 2), 48);
-    const rules = await payRules();
+    const { rules, overrides } = await loadSchedule();
     if (rules.length === 0) return reply.send({ periods: [] });
 
     // One row per day and kind, bucketed into periods here rather than issuing
@@ -67,18 +58,18 @@ export function registerStatsRoutes(app: FastifyInstance) {
     };
 
     for (const row of rows) {
-      const month = periodContaining(iso(row.occurred_on), rules).month;
+      const month = periodContaining(iso(row.occurred_on), rules, overrides).month;
       const bucket = touch(month);
       if (row.kind === 'expense') bucket.expenses += Number(row.total);
       else bucket.income += Number(row.total);
     }
     for (const row of savingsRows) {
-      touch(periodContaining(iso(row.occurred_on), rules).month).savings += Number(row.total);
+      touch(periodContaining(iso(row.occurred_on), rules, overrides).month).savings += Number(row.total);
     }
 
     // Walk back from the period containing today so the series is continuous
     // even where a period had no activity at all.
-    const current = periodContaining(todayIso(), rules).month;
+    const current = periodContaining(todayIso(), rules, overrides).month;
     const months: string[] = [];
     for (let offset = limit - 1; offset >= 0; offset--) months.push(shiftMonth(current, -offset));
 
@@ -86,14 +77,14 @@ export function registerStatsRoutes(app: FastifyInstance) {
       'select min(occurred_on) as earliest from entries',
     );
     const firstMonth = earliest[0]?.earliest
-      ? periodContaining(iso(earliest[0].earliest), rules).month
+      ? periodContaining(iso(earliest[0].earliest), rules, overrides).month
       : current;
 
     const periods = months
       .filter((month) => month >= firstMonth)
       .map((month) => {
         const bucket = buckets.get(month) ?? { expenses: 0, income: 0, savings: 0 };
-        const period = periodFor(month, rules);
+        const period = periodFor(month, rules, overrides);
         return {
           month,
           start: period.start,
@@ -112,13 +103,13 @@ export function registerStatsRoutes(app: FastifyInstance) {
 
   /** Category spend for one period, with the previous period for comparison. */
   app.get<{ Querystring: { month?: string } }>('/api/stats/categories', async (request, reply) => {
-    const rules = await payRules();
+    const { rules, overrides } = await loadSchedule();
     const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(request.query.month ?? '')
       ? request.query.month!
-      : periodContaining(todayIso(), rules).month;
+      : periodContaining(todayIso(), rules, overrides).month;
 
-    const period = periodFor(month, rules);
-    const previous = periodFor(shiftMonth(month, -1), rules);
+    const period = periodFor(month, rules, overrides);
+    const previous = periodFor(shiftMonth(month, -1), rules, overrides);
 
     const rows = await query<{ name: string; bucket: string | null; amount: number; prior: number }>(
       `select c.name, c.bucket,

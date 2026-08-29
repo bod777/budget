@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, type PayRuleRow } from '../api.ts';
+import { api, type PayOverrideRow, type PayRuleRow, type PreviewPeriod } from '../api.ts';
 import { SheetMirror } from './SheetMirror.tsx';
 import { Accounts } from './Accounts.tsx';
 
@@ -48,21 +48,46 @@ function thisMonth(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
+function today(): string {
+  const now = new Date();
+  return `${thisMonth()}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+function dateLabel(iso: string): string {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString('en-IE', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function nextMonth(month: string): string {
+  const [year, m] = month.split('-').map(Number) as [number, number];
+  const date = new Date(Date.UTC(year, m, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
 export function PaySchedule({ toast, onChanged, reference, refreshKey }: Props) {
   const [rules, setRules] = useState<PayRuleRow[]>([]);
-  const [preview, setPreview] = useState<
-    { month: string; start: string; end: string; isCurrent: boolean }[]
-  >([]);
+  const [overrides, setOverrides] = useState<PayOverrideRow[]>([]);
+  const [preview, setPreview] = useState<PreviewPeriod[]>([]);
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<{ effectiveFrom: string; dayRule: 'last' | number; note: string }>(
     { effectiveFrom: thisMonth(), dayRule: 'last', note: '' },
   );
   const [error, setError] = useState<string | null>(null);
+  const [oneOff, setOneOff] = useState<{ month: string; paidOn: string; note: string }>({
+    month: thisMonth(),
+    paidOn: today(),
+    note: '',
+  });
 
   const load = useCallback(async () => {
     const result = await api.paySchedule();
     setRules(result.rules);
+    setOverrides(result.overrides ?? []);
     setPreview(result.preview ?? []);
   }, []);
 
@@ -118,6 +143,40 @@ export function PaySchedule({ toast, onChanged, reference, refreshKey }: Props) 
       onChanged();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not delete');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveOneOff() {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.setPayOverride(oneOff.month, {
+        paidOn: oneOff.paidOn,
+        note: oneOff.note || null,
+      });
+      await load();
+      onChanged();
+      toast(`${monthLabel(result.next.month)} now starts ${dateLabel(result.paidOn)}`);
+      setOneOff({ month: thisMonth(), paidOn: today(), note: '' });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not save');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clearOneOff(month: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.clearPayOverride(month);
+      await load();
+      onChanged();
+      toast(`${monthLabel(month)} is back on the usual schedule`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not remove');
     } finally {
       setBusy(false);
     }
@@ -256,6 +315,71 @@ export function PaySchedule({ toast, onChanged, reference, refreshKey }: Props) 
 
       {error && <div className="banner warn" style={{ marginTop: 12 }}>{error}</div>}
 
+      <h2>Paid early or late one month</h2>
+      <div className="card stack">
+        <p className="small muted" style={{ margin: 0 }}>
+          Recording the day pay actually landed changes that one month only, leaving the schedule
+          above alone. Naming a month closes its period on that day and opens the next one — pay
+          arriving early in {monthLabel(oneOff.month)} starts the {monthLabel(nextMonth(oneOff.month))}{' '}
+          budget early.
+        </p>
+
+        {overrides.map((override) => (
+          <div key={override.month} className="rule-row">
+            <div>
+              {monthLabel(override.month)} — paid {dateLabel(override.paidOn)}
+              {override.note && <div className="small muted">{override.note}</div>}
+            </div>
+            <button
+              type="button"
+              className="btn secondary small"
+              disabled={busy}
+              title="Back to the usual schedule"
+              onClick={() => void clearOneOff(override.month)}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+
+        <div className="row">
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label htmlFor="oneoff-month">Pay for</label>
+            <input
+              id="oneoff-month"
+              type="month"
+              value={oneOff.month}
+              onChange={(event) => setOneOff((d) => ({ ...d, month: event.target.value }))}
+            />
+          </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label htmlFor="oneoff-date">Landed on</label>
+            <input
+              id="oneoff-date"
+              type="date"
+              value={oneOff.paidOn}
+              onChange={(event) => setOneOff((d) => ({ ...d, paidOn: event.target.value }))}
+            />
+          </div>
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label htmlFor="oneoff-note">Note</label>
+          <input
+            id="oneoff-note"
+            type="text"
+            placeholder="e.g. paid early"
+            value={oneOff.note}
+            onChange={(event) => setOneOff((d) => ({ ...d, note: event.target.value }))}
+          />
+        </div>
+        <div className="spread">
+          <span />
+          <button type="button" className="btn small" disabled={busy} onClick={() => void saveOneOff()}>
+            Record this pay date
+          </button>
+        </div>
+      </div>
+
       <h2>Periods this produces</h2>
       <div className="card">
         <table className="budget-table">
@@ -266,7 +390,12 @@ export function PaySchedule({ toast, onChanged, reference, refreshKey }: Props) 
                   {monthLabel(period.month)}
                   {period.isCurrent && <span className="badge-soft">now</span>}
                 </td>
-                <td className="num">{rangeLabel(period.start, period.end)}</td>
+                <td className="num">
+                  {rangeLabel(period.start, period.end)}
+                  {(period.startOverridden || period.endOverridden) && (
+                    <span className="badge-soft">one-off</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

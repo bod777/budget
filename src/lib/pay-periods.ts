@@ -7,6 +7,10 @@
  *
  * The end is exclusive, so the next payday belongs to the next period and no
  * day is counted twice.
+ *
+ * Where pay landed somewhere other than the rule predicts -- paid early before
+ * a bank holiday weekend, say -- that single month is recorded as an override
+ * rather than by changing the rule, which would move every later period too.
  */
 import { previousWorkingDay } from './irish-holidays.ts';
 
@@ -15,6 +19,19 @@ export interface PayRule {
   effectiveFrom: string;
   /** 'last' for the last day of the month, otherwise a day of the month. */
   dayRule: 'last' | number;
+  note?: string | null;
+}
+
+/**
+ * A month where pay actually landed somewhere other than the rule says --
+ * paid early before Christmas, say. Recorded per month, because it is a fact
+ * about that month rather than a change of schedule.
+ */
+export interface PayOverride {
+  /** Month whose payday moved, YYYY-MM. */
+  month: string;
+  /** The date pay actually arrived. Taken literally. */
+  paidOn: string;
   note?: string | null;
 }
 
@@ -59,8 +76,14 @@ function ruleFor(rules: PayRule[], month: string): PayRule {
 /**
  * The day pay actually lands for a given month: the nominal day, moved back to
  * the previous working day when it falls on a weekend or bank holiday.
+ *
+ * A recorded override for the month wins outright and is not shifted -- it is
+ * the observed date, not one derived from a rule.
  */
-export function paydayFor(month: string, rules: PayRule[]): string {
+export function paydayFor(month: string, rules: PayRule[], overrides: PayOverride[] = []): string {
+  const override = overrides.find((entry) => entry.month === month);
+  if (override) return override.paidOn;
+
   const { year, month: m } = parseMonth(month);
   const rule = ruleFor(rules, month);
   const last = daysInMonth(year, m);
@@ -69,35 +92,44 @@ export function paydayFor(month: string, rules: PayRule[]): string {
 }
 
 /** The period named for `month`: from the previous payday up to this one. */
-export function periodFor(month: string, rules: PayRule[]): Period {
+export function periodFor(month: string, rules: PayRule[], overrides: PayOverride[] = []): Period {
   return {
     month,
-    start: paydayFor(shiftMonth(month, -1), rules),
-    end: paydayFor(month, rules),
+    start: paydayFor(shiftMonth(month, -1), rules, overrides),
+    end: paydayFor(month, rules, overrides),
   };
 }
 
 /** The period a given date falls inside. */
-export function periodContaining(date: string, rules: PayRule[]): Period {
+export function periodContaining(
+  date: string,
+  rules: PayRule[],
+  overrides: PayOverride[] = [],
+): Period {
   const month = date.slice(0, 7);
   // The date's own month is the natural first guess, but a date on or after
   // that month's payday belongs to the next period, and one before the
   // previous payday to an earlier period.
   for (const delta of [0, 1, -1, 2, -2]) {
-    const candidate = periodFor(shiftMonth(month, delta), rules);
+    const candidate = periodFor(shiftMonth(month, delta), rules, overrides);
     if (date >= candidate.start && date < candidate.end) return candidate;
   }
-  return periodFor(month, rules);
+  return periodFor(month, rules, overrides);
 }
 
 /** Every period between two dates, oldest first. */
-export function periodsBetween(from: string, to: string, rules: PayRule[]): Period[] {
-  const first = periodContaining(from, rules);
-  const last = periodContaining(to, rules);
+export function periodsBetween(
+  from: string,
+  to: string,
+  rules: PayRule[],
+  overrides: PayOverride[] = [],
+): Period[] {
+  const first = periodContaining(from, rules, overrides);
+  const last = periodContaining(to, rules, overrides);
   const periods: Period[] = [];
   let cursor = first.month;
   for (let guard = 0; guard < 600; guard++) {
-    periods.push(periodFor(cursor, rules));
+    periods.push(periodFor(cursor, rules, overrides));
     if (cursor === last.month) break;
     cursor = shiftMonth(cursor, 1);
   }

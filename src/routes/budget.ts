@@ -1,12 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { query, withTransaction } from '../db.ts';
-import {
-  periodContaining,
-  periodFor,
-  shiftMonth,
-  type PayRule,
-  type Period,
-} from '../lib/pay-periods.ts';
+import { periodContaining, periodFor, shiftMonth, type Period } from '../lib/pay-periods.ts';
+import { loadSchedule, type Schedule } from './pay-schedule.ts';
 
 /**
  * Period rollup, replacing the copied budget workbook.
@@ -30,22 +25,11 @@ function isMonth(value: string): boolean {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 }
 
-async function payRules(): Promise<PayRule[]> {
-  const rows = await query<{ effective_from: string; day_rule: string; note: string | null }>(
-    'select effective_from, day_rule, note from pay_schedule order by effective_from',
-  );
-  return rows.map((row) => ({
-    effectiveFrom: String(row.effective_from).slice(0, 10),
-    dayRule: row.day_rule === 'last' ? 'last' : Number(row.day_rule),
-    note: row.note,
-  }));
-}
-
 /**
  * Boundaries for a period. A stored pair wins over a computed one, so editing
  * the schedule cannot silently move a period that has already been closed off.
  */
-async function boundsFor(month: string, rules: PayRule[]): Promise<Period> {
+async function boundsFor(month: string, schedule: Schedule): Promise<Period> {
   const stored = await query<{ period_start: string | null; period_end: string | null }>(
     'select period_start, period_end from budget_months where month = $1::date',
     [`${month}-01`],
@@ -58,7 +42,7 @@ async function boundsFor(month: string, rules: PayRule[]): Promise<Period> {
       end: String(row.period_end).slice(0, 10),
     };
   }
-  return periodFor(month, rules);
+  return periodFor(month, schedule.rules, schedule.overrides);
 }
 
 
@@ -70,7 +54,7 @@ async function boundsFor(month: string, rules: PayRule[]): Promise<Period> {
  * started -- it is rolled forward from the last one that was, so a new budget
  * arrives with the surplus already carried rather than at zero.
  */
-async function openingSurplusFor(month: string, rules: PayRule[]): Promise<number> {
+async function openingSurplusFor(month: string, schedule: Schedule): Promise<number> {
   const stored = await query<{ opening_surplus: number }>(
     'select opening_surplus from budget_months where month = $1::date',
     [`${month}-01`],
@@ -93,7 +77,7 @@ async function openingSurplusFor(month: string, rules: PayRule[]): Promise<numbe
 
   let cursor = from;
   for (let guard = 0; guard < 36 && cursor < month; guard++) {
-    const period = periodFor(cursor, rules);
+    const period = periodFor(cursor, schedule.rules, schedule.overrides);
     const sums = await query<{ kind: string; total: number }>(
       `select c.kind, coalesce(sum(e.amount), 0) as total
        from entries e join categories c on c.id = e.category_id
@@ -127,8 +111,8 @@ export function registerBudgetRoutes(app: FastifyInstance) {
     const month = request.params.month;
     if (!isMonth(month)) return reply.code(400).send({ error: 'month must be YYYY-MM' });
 
-    const rules = await payRules();
-    const period = await boundsFor(month, rules);
+    const schedule = await loadSchedule();
+    const period = await boundsFor(month, schedule);
     const start = `${month}-01`;
 
     const monthRow = await query<{ opening_surplus: number; note: string | null }>(
@@ -232,7 +216,7 @@ export function registerBudgetRoutes(app: FastifyInstance) {
     const savingsActual =
       Math.round(savings.reduce((t, s) => t + Number(s.actual), 0) * 100) / 100;
 
-    const openingSurplus = await openingSurplusFor(month, rules);
+    const openingSurplus = await openingSurplusFor(month, schedule);
     const incomeSurplusBudget = Math.round((incomeBudget - expenseBudget) * 100) / 100;
     const incomeSurplusActual = Math.round((incomeActual - expenseActual) * 100) / 100;
     const thisMonthBudget = Math.round((incomeSurplusBudget - savingsBudget) * 100) / 100;
@@ -281,9 +265,9 @@ export function registerBudgetRoutes(app: FastifyInstance) {
       const source = request.body?.copyFrom ?? shiftMonth(month, -1);
       if (!isMonth(source)) return reply.code(400).send({ error: 'copyFrom must be YYYY-MM' });
 
-      const rules = await payRules();
-      const period = await boundsFor(month, rules);
-      const sourcePeriod = await boundsFor(source, rules);
+      const schedule = await loadSchedule();
+      const period = await boundsFor(month, schedule);
+      const sourcePeriod = await boundsFor(source, schedule);
       const start = `${month}-01`;
       const sourceStart = `${source}-01`;
 
@@ -367,8 +351,8 @@ export function registerBudgetRoutes(app: FastifyInstance) {
     if (!isMonth(month)) return reply.code(400).send({ error: 'month must be YYYY-MM' });
     const start = `${month}-01`;
     const body = request.body ?? {};
-    const rules = await payRules();
-    const period = await boundsFor(month, rules);
+    const schedule = await loadSchedule();
+    const period = await boundsFor(month, schedule);
 
     await withTransaction(async (client) => {
       await client.query(
@@ -407,7 +391,7 @@ export function registerBudgetRoutes(app: FastifyInstance) {
 
   /** Period list for the picker, newest first. */
   app.get('/api/months', async (_request, reply) => {
-    const rules = await payRules();
+    const { rules, overrides } = await loadSchedule();
     const bounds = await query<{ earliest: string | null; latest: string | null }>(
       'select min(occurred_on) as earliest, max(occurred_on) as latest from entries',
     );
@@ -420,8 +404,8 @@ export function registerBudgetRoutes(app: FastifyInstance) {
     const latest = bounds[0]?.latest;
 
     if (earliest && latest) {
-      const first = periodContaining(String(earliest).slice(0, 10), rules);
-      const last = periodContaining(String(latest).slice(0, 10), rules);
+      const first = periodContaining(String(earliest).slice(0, 10), rules, overrides);
+      const last = periodContaining(String(latest).slice(0, 10), rules, overrides);
       let cursor = first.month;
       for (let guard = 0; guard < 600; guard++) {
         months.add(cursor);

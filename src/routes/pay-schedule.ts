@@ -1,6 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { query, withTransaction } from '../db.ts';
-import { periodContaining, periodFor, shiftMonth, type PayRule } from '../lib/pay-periods.ts';
+import {
+  periodContaining,
+  periodFor,
+  shiftMonth,
+  type PayOverride,
+  type PayRule,
+} from '../lib/pay-periods.ts';
 
 /**
  * Editing the pay schedule.
@@ -8,7 +14,15 @@ import { periodContaining, periodFor, shiftMonth, type PayRule } from '../lib/pa
  * A rule applies from a given month until a later rule supersedes it, so
  * changing jobs means adding a row rather than editing the old one — which
  * keeps historical periods computable.
+ *
+ * A one-off — pay landing early one month — is an override on that month
+ * instead: changing the rule would move every period after it as well.
  */
+
+export interface Schedule {
+  rules: PayRule[];
+  overrides: PayOverride[];
+}
 
 export interface RuleInput {
   effectiveFrom?: string;
@@ -52,6 +66,27 @@ async function loadRules(): Promise<PayRule[]> {
   }));
 }
 
+async function loadOverrides(): Promise<PayOverride[]> {
+  const rows = await query<{ month: string; paid_on: string; note: string | null }>(
+    'select month, paid_on, note from pay_overrides order by month',
+  );
+  return rows.map((row) => ({
+    month: String(row.month).slice(0, 7),
+    paidOn: String(row.paid_on).slice(0, 10),
+    note: row.note,
+  }));
+}
+
+/**
+ * The whole schedule: the standing rules plus any months where pay actually
+ * landed elsewhere. Every route that works out a period loads it from here, so
+ * a one-off cannot be honoured on the dashboard and forgotten in the charts.
+ */
+export async function loadSchedule(): Promise<Schedule> {
+  const [rules, overrides] = await Promise.all([loadRules(), loadOverrides()]);
+  return { rules, overrides };
+}
+
 function todayIso(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
@@ -60,13 +95,19 @@ function todayIso(): string {
 }
 
 /** A window of periods around today, so the effect of a rule is visible. */
-function previewPeriods(rules: PayRule[], back = 4, forward = 4) {
+function previewPeriods({ rules, overrides }: Schedule, back = 4, forward = 4) {
   if (rules.length === 0) return [];
-  const current = periodContaining(todayIso(), rules);
+  const current = periodContaining(todayIso(), rules, overrides);
   const periods = [];
   for (let offset = -back; offset <= forward; offset++) {
     const month = shiftMonth(current.month, offset);
-    periods.push({ ...periodFor(month, rules), isCurrent: offset === 0 });
+    periods.push({
+      ...periodFor(month, rules, overrides),
+      isCurrent: offset === 0,
+      // Which end of this period a one-off moved, so the UI can say so.
+      startOverridden: overrides.some((o) => o.month === shiftMonth(month, -1)),
+      endOverridden: overrides.some((o) => o.month === month),
+    });
   }
   return periods;
 }
@@ -80,7 +121,7 @@ export function registerPayScheduleRoutes(app: FastifyInstance) {
       note: string | null;
     }>('select id, effective_from, day_rule, note from pay_schedule order by effective_from');
 
-    const rules = await loadRules();
+    const schedule = await loadSchedule();
     return reply.send({
       rules: rows.map((row) => ({
         id: row.id,
@@ -88,8 +129,11 @@ export function registerPayScheduleRoutes(app: FastifyInstance) {
         dayRule: row.day_rule === 'last' ? 'last' : Number(row.day_rule),
         note: row.note,
       })),
-      current: rules.length ? periodContaining(todayIso(), rules) : null,
-      preview: previewPeriods(rules),
+      overrides: schedule.overrides,
+      current: schedule.rules.length
+        ? periodContaining(todayIso(), schedule.rules, schedule.overrides)
+        : null,
+      preview: previewPeriods(schedule),
     });
   });
 
@@ -153,13 +197,102 @@ export function registerPayScheduleRoutes(app: FastifyInstance) {
   });
 
   /**
+   * Records the day pay actually landed for one month — paid early before a
+   * holiday weekend, say.
+   *
+   * The month named is the one the payday belongs to, and moving it moves two
+   * boundaries at once: the end of that month's period and the start of the
+   * next. Any boundary already pinned on those two periods is released, since
+   * a pinned date would otherwise outrank the correction being made here.
+   */
+  app.put<{ Params: { month: string }; Body: { paidOn?: string; note?: string | null } }>(
+    '/api/pay-schedule/overrides/:month',
+    async (request, reply) => {
+      const month = request.params.month;
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+        return reply.code(400).send({ error: 'month must be YYYY-MM' });
+      }
+      const paidOn = (request.body?.paidOn ?? '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) {
+        return reply.code(400).send({ error: 'paidOn must be YYYY-MM-DD' });
+      }
+      // A payday belongs to its month, give or take the few days either side a
+      // real early or late run moves it.
+      const distance = Math.abs(Date.parse(paidOn) - Date.parse(`${month}-15`));
+      if (!Number.isFinite(distance) || distance > 40 * 24 * 60 * 60 * 1000) {
+        return reply.code(400).send({ error: `${paidOn} is not near ${month}` });
+      }
+      const note =
+        typeof request.body?.note === 'string' && request.body.note.trim() !== ''
+          ? request.body.note.trim()
+          : null;
+
+      await withTransaction(async (client) => {
+        await client.query(
+          `insert into pay_overrides (month, paid_on, note)
+           values ($1::date, $2::date, $3)
+           on conflict (month) do update set paid_on = excluded.paid_on, note = excluded.note`,
+          [`${month}-01`, paidOn, note],
+        );
+        await client.query(
+          'update budget_months set period_end = null where month = $1::date',
+          [`${month}-01`],
+        );
+        await client.query(
+          'update budget_months set period_start = null where month = $1::date',
+          [`${shiftMonth(month, 1)}-01`],
+        );
+      });
+
+      const schedule = await loadSchedule();
+      return reply.send({
+        month,
+        paidOn,
+        period: periodFor(month, schedule.rules, schedule.overrides),
+        next: periodFor(shiftMonth(month, 1), schedule.rules, schedule.overrides),
+        preview: previewPeriods(schedule),
+      });
+    },
+  );
+
+  /** Puts a month back on the standing schedule. */
+  app.delete<{ Params: { month: string } }>(
+    '/api/pay-schedule/overrides/:month',
+    async (request, reply) => {
+      const month = request.params.month;
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+        return reply.code(400).send({ error: 'month must be YYYY-MM' });
+      }
+
+      const removed = await withTransaction(async (client) => {
+        const result = await client.query('delete from pay_overrides where month = $1::date', [
+          `${month}-01`,
+        ]);
+        if (result.rowCount) {
+          await client.query('update budget_months set period_end = null where month = $1::date', [
+            `${month}-01`,
+          ]);
+          await client.query(
+            'update budget_months set period_start = null where month = $1::date',
+            [`${shiftMonth(month, 1)}-01`],
+          );
+        }
+        return result.rowCount ?? 0;
+      });
+      if (removed === 0) return reply.code(404).send({ error: 'not found' });
+
+      return reply.send({ deleted: month, preview: previewPeriods(await loadSchedule()) });
+    },
+  );
+
+  /**
    * Drops the boundaries pinned to past periods so they follow the current
    * schedule again. Kept as an explicit action because it rewrites the shape of
    * history: a period that has already been reported on will move.
    */
   app.post<{ Body: { from?: string } }>('/api/pay-schedule/rederive', async (request, reply) => {
     const from = (request.body?.from ?? '').trim();
-    const rules = await loadRules();
+    const schedule = await loadSchedule();
 
     const affected = await withTransaction(async (client) => {
       const result = from.match(/^\d{4}-(0[1-9]|1[0-2])$/)
@@ -174,6 +307,6 @@ export function registerPayScheduleRoutes(app: FastifyInstance) {
       return result.rowCount ?? 0;
     });
 
-    return reply.send({ rederived: affected, preview: previewPeriods(rules) });
+    return reply.send({ rederived: affected, preview: previewPeriods(schedule) });
   });
 }

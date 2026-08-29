@@ -129,6 +129,24 @@ export interface PayRuleRow {
   note: string | null;
 }
 
+/** A month where pay landed somewhere other than the schedule says. */
+export interface PayOverrideRow {
+  /** YYYY-MM. */
+  month: string;
+  /** YYYY-MM-DD, the day pay actually arrived. */
+  paidOn: string;
+  note: string | null;
+}
+
+export interface PreviewPeriod {
+  month: string;
+  start: string;
+  end: string;
+  isCurrent: boolean;
+  startOverridden: boolean;
+  endOverridden: boolean;
+}
+
 export interface Period {
   month: string;
   /** Inclusive. */
@@ -335,8 +353,9 @@ export const api = {
   paySchedule: () =>
     request<{
       rules: PayRuleRow[];
+      overrides: PayOverrideRow[];
       current: Period | null;
-      preview: { month: string; start: string; end: string; isCurrent: boolean }[];
+      preview: PreviewPeriod[];
     }>('/api/pay-schedule'),
   createPayRule: (payload: { effectiveFrom: string; dayRule: 'last' | number; note: string | null }) =>
     request<{ id: number }>('/api/pay-schedule', {
@@ -353,6 +372,13 @@ export const api = {
     }),
   deletePayRule: (id: number) =>
     request<{ deleted: number }>(`/api/pay-schedule/${id}`, { method: 'DELETE' }),
+  setPayOverride: (month: string, payload: { paidOn: string; note: string | null }) =>
+    request<{ month: string; paidOn: string; period: Period; next: Period }>(
+      `/api/pay-schedule/overrides/${month}`,
+      { method: 'PUT', body: JSON.stringify(payload) },
+    ),
+  clearPayOverride: (month: string) =>
+    request<{ deleted: string }>(`/api/pay-schedule/overrides/${month}`, { method: 'DELETE' }),
   sheetSyncStatus: () => request<SheetSyncStatus>('/api/sheet-sync'),
   runSheetSync: () =>
     request<{ ok: true; expenses: number; income: number; transfers: number; periods: number }>(

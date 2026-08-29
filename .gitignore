@@ -22,3 +22,6 @@ data/raw/*.csv
 data/normalised/
 *.log
 .DS_Store
+
+# tsc output accidentally emitted beside the sources
+web/src/**/*.js

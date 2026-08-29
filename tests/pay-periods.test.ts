@@ -9,6 +9,7 @@ import {
   paydayFor,
   periodContaining,
   periodFor,
+  type PayOverride,
   type PayRule,
 } from '../src/lib/pay-periods.ts';
 
@@ -115,4 +116,47 @@ test('periods are contiguous and never overlap', () => {
     assert.ok(month.end > month.start, `${month.month} must not be empty`);
     previous = month;
   }
+});
+
+// August 2026 pay landed on Friday the 28th rather than Monday the 31st.
+const PAID_EARLY: PayOverride[] = [{ month: '2026-08', paidOn: '2026-08-28' }];
+
+test('a one-off pay date overrides the rule for that month alone', () => {
+  assert.equal(paydayFor('2026-08', RULES, PAID_EARLY), '2026-08-28');
+  // Neither neighbour moves.
+  assert.equal(paydayFor('2026-07', RULES, PAID_EARLY), '2026-07-31');
+  assert.equal(paydayFor('2026-09', RULES, PAID_EARLY), '2026-09-30');
+});
+
+test('a one-off is taken literally, not shifted to a working day', () => {
+  // Someone recording a Saturday means that Saturday, not the Friday before.
+  const onASaturday: PayOverride[] = [{ month: '2026-08', paidOn: '2026-08-29' }];
+  assert.equal(paydayFor('2026-08', RULES, onASaturday), '2026-08-29');
+});
+
+test('moving a payday closes one period early and opens the next early', () => {
+  assert.deepEqual(periodFor('2026-08', RULES, PAID_EARLY), {
+    month: '2026-08',
+    start: '2026-07-31',
+    end: '2026-08-28',
+  });
+  assert.deepEqual(periodFor('2026-09', RULES, PAID_EARLY), {
+    month: '2026-09',
+    start: '2026-08-28',
+    end: '2026-09-30',
+  });
+  // Still contiguous: nothing is counted twice or dropped.
+  assert.equal(
+    periodFor('2026-08', RULES, PAID_EARLY).end,
+    periodFor('2026-09', RULES, PAID_EARLY).start,
+  );
+});
+
+test('spending after an early payday counts against the new period', () => {
+  // 28-30 August would have belonged to August; the early pay moves them.
+  assert.equal(periodContaining('2026-08-27', RULES, PAID_EARLY).month, '2026-08');
+  assert.equal(periodContaining('2026-08-28', RULES, PAID_EARLY).month, '2026-09');
+  assert.equal(periodContaining('2026-08-31', RULES, PAID_EARLY).month, '2026-09');
+  // Without the override those same days sit either side of the 31st.
+  assert.equal(periodContaining('2026-08-28', RULES).month, '2026-08');
 });
