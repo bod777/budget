@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, formatMoney, type CategoryStat, type PeriodStat, type Reference } from '../api.ts';
+import { Accounts } from './Accounts.tsx';
 
 interface Props {
   reference: Reference;
@@ -202,6 +203,12 @@ export function Trends({ reference, refreshKey }: Props) {
           )}
         </div>
       </div>
+
+      <div className="spread" style={{ marginTop: 22 }}>
+        <h2 style={{ margin: 0 }}>Balances</h2>
+        <span className="small muted">right now</span>
+      </div>
+      <Accounts reference={reference} refreshKey={refreshKey} compact />
 
       <h2>Where it went this period</h2>
       <div className="card">
