@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { query, withTransaction } from '../db.ts';
 import {
+  paydayMonthFor,
   periodContaining,
   periodFor,
   shiftMonth,
@@ -136,6 +137,34 @@ export function registerPayScheduleRoutes(app: FastifyInstance) {
       preview: previewPeriods(schedule),
     });
   });
+
+  app.get<{ Querystring: { date?: string } }>(
+    '/api/pay-schedule/payday-preview',
+    async (request, reply) => {
+      const date = (request.query.date ?? '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return reply.code(400).send({ error: 'date must be YYYY-MM-DD' });
+      }
+      const schedule = await loadSchedule();
+      if (schedule.rules.length === 0) return reply.code(400).send({ error: 'no pay schedule' });
+
+      const month = paydayMonthFor(date, schedule.rules);
+      const scheduled = periodFor(month, schedule.rules).end;
+      const nextMonth = shiftMonth(month, 1);
+
+      // What the periods become once this date is taken as the payday.
+      const withThis = [...schedule.overrides.filter((o) => o.month !== month), { month, paidOn: date }];
+      return reply.send({
+        month,
+        nextMonth,
+        scheduled,
+        // Nothing to record when pay landed exactly where the rule expected.
+        alreadyScheduled: scheduled === date,
+        closes: periodFor(month, schedule.rules, withThis),
+        opens: periodFor(nextMonth, schedule.rules, withThis),
+      });
+    },
+  );
 
   app.post<{ Body: RuleInput }>('/api/pay-schedule', async (request, reply) => {
     const parsed = normaliseRule(request.body ?? {});

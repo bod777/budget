@@ -7,6 +7,7 @@ import {
   todayIso,
   type Entry,
   type Kind,
+  type PaydayPreview,
   type Reference,
   type SpendKind,
   type Template,
@@ -44,6 +45,24 @@ function emptyDraft(kind: Kind, occurredOn: string): Draft {
   };
 }
 
+function monthName(month: string): string {
+  return new Date(`${month}-01T00:00:00`).toLocaleDateString('en-IE', {
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+function dayText(iso: string, offsetDays = 0): string {
+  const date = new Date(`${iso}T00:00:00`);
+  date.setDate(date.getDate() + offsetDays);
+  return date.toLocaleDateString('en-IE', { day: 'numeric', month: 'short' });
+}
+
+/** The end is exclusive, so the range is shown up to the last day inside it. */
+function rangeText(start: string, end: string): string {
+  return `${dayText(start)} – ${dayText(end, -1)}`;
+}
+
 const KIND_LABEL: Record<Kind, string> = {
   expense: 'Expense',
   income: 'Income',
@@ -59,6 +78,9 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
   // Entries added in this sitting. Batch entry is the normal case, so showing
   // the running list makes it obvious where you are in a bank statement.
   const [session, setSession] = useState<Entry[]>([]);
+  // Off by default: closing a budget period is not something to do by accident.
+  const [marksPayday, setMarksPayday] = useState(false);
+  const [paydayPreview, setPaydayPreview] = useState<PaydayPreview | null>(null);
   const [choosingQuick, setChoosingQuick] = useState(false);
   const [quickKey, setQuickKey] = useState(0);
 
@@ -82,6 +104,34 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
         : reference.accounts.filter((a) => a.usableFor.includes(spendKind)),
     [reference.accounts, isTransfer, spendKind],
   );
+
+  useEffect(() => {
+    if (draft.kind !== 'income') {
+      setMarksPayday(false);
+      setPaydayPreview(null);
+    }
+  }, [draft.kind]);
+
+  // What ticking the box would do, worked out by the server so the form can
+  // say it before anything is saved.
+  useEffect(() => {
+    if (!marksPayday || draft.kind !== 'income') {
+      setPaydayPreview(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .paydayPreview(draft.occurredOn)
+      .then((result) => {
+        if (!cancelled) setPaydayPreview(result);
+      })
+      .catch(() => {
+        if (!cancelled) setPaydayPreview(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [marksPayday, draft.kind, draft.occurredOn]);
 
   useEffect(() => {
     if (isTransfer) {
@@ -191,6 +241,7 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
         categoryId: isTransfer ? null : draft.categoryId,
         accountId: draft.accountId,
         toAccountId: isTransfer ? draft.toAccountId : null,
+        marksPayday: draft.kind === 'income' ? marksPayday : false,
         force,
       });
 
@@ -419,6 +470,45 @@ export function EntryForm({ reference, onSaved, toast }: Props) {
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {draft.kind === 'income' && (
+          <div className="field">
+            <label className="checkline">
+              <input
+                type="checkbox"
+                checked={marksPayday}
+                onChange={(event) => setMarksPayday(event.target.checked)}
+              />
+              <span>
+                This is my payday — close this budget and start the next
+                <span className="small muted" style={{ display: 'block' }}>
+                  Leave off for any other income. Only tick it for the pay that starts a period.
+                </span>
+              </span>
+            </label>
+
+            {marksPayday && paydayPreview && (
+              <div className={`banner ${paydayPreview.alreadyScheduled ? 'info' : 'warn'}`}>
+                {paydayPreview.alreadyScheduled ? (
+                  <>
+                    That is already the scheduled payday, so nothing moves.{' '}
+                    {monthName(paydayPreview.nextMonth)} runs{' '}
+                    {rangeText(paydayPreview.opens.start, paydayPreview.opens.end)}.
+                  </>
+                ) : (
+                  <>
+                    {monthName(paydayPreview.month)} will close on{' '}
+                    {dayText(paydayPreview.closes.end, -1)} instead of{' '}
+                    {dayText(paydayPreview.scheduled, -1)}, and{' '}
+                    {monthName(paydayPreview.nextMonth)} will run{' '}
+                    {rangeText(paydayPreview.opens.start, paydayPreview.opens.end)} — back to the
+                    usual end date.
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
 

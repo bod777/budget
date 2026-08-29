@@ -756,6 +756,29 @@ button:focus-visible {
   border-bottom: 0;
 }
 
+.field > label.checkline,
+.checkline {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.field > label.checkline > span {
+  font-weight: 500;
+}
+
+.checkline input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  flex: none;
+  accent-color: var(--accent);
+}
+
 .muted {
   color: var(--text-dim);
 }

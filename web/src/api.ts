@@ -121,6 +121,16 @@ export interface SavingsLine {
   actual: number;
 }
 
+export interface PaydayPreview {
+  month: string;
+  nextMonth: string;
+  scheduled: string;
+  /** True when pay landed exactly where the schedule expected. */
+  alreadyScheduled: boolean;
+  closes: Period;
+  opens: Period;
+}
+
 export interface PayRuleRow {
   id: number;
   /** YYYY-MM, the first month this rule applies to. */
@@ -314,10 +324,13 @@ export const api = {
     return request<{ entries: Entry[] }>(`/api/entries?${search}`);
   },
   createEntry: (payload: Record<string, unknown>) =>
-    request<{ entry: Entry }>('/api/entries', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
+    request<{ entry: Entry; payday?: { month: string; closes: string; opens: string } | null }>(
+      '/api/entries',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    ),
   checkDuplicate: (payload: Record<string, unknown>) =>
     request<{ duplicates: Entry[] }>('/api/entries/check', {
       method: 'POST',
@@ -379,6 +392,9 @@ export const api = {
     ),
   clearPayOverride: (month: string) =>
     request<{ deleted: string }>(`/api/pay-schedule/overrides/${month}`, { method: 'DELETE' }),
+  paydayPreview: (date: string) =>
+    request<PaydayPreview>(`/api/pay-schedule/payday-preview?date=${date}`),
+
   sheetSyncStatus: () => request<SheetSyncStatus>('/api/sheet-sync'),
   runSheetSync: () =>
     request<{ ok: true; expenses: number; income: number; transfers: number; periods: number }>(

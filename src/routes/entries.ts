@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { query, withTransaction } from '../db.ts';
 import { resolveCounterparty } from '../lib/counterparties.ts';
 import { tidy } from '../lib/text.ts';
+import { paydayMonthFor, shiftMonth, type PayRule } from '../lib/pay-periods.ts';
 
 interface EntryInput {
   kind?: string;
@@ -14,6 +15,8 @@ interface EntryInput {
   toAccountId?: number | null;
   note?: string | null;
   force?: boolean;
+  /** Income only: treat this entry's date as the payday for its period. */
+  marksPayday?: boolean;
 }
 
 const SELECT_ENTRY = `
@@ -237,8 +240,39 @@ export function registerEntryRoutes(app: FastifyInstance) {
         ],
       );
 
+      // Recording the payday happens with the entry, not after it: a salary
+      // logged while its period stays open is exactly the mismatch this is
+      // meant to prevent.
+      let payday: { month: string; closes: string; opens: string } | null = null;
+      if (request.body.marksPayday && value.kind === 'income') {
+        const ruleRows = await client.query<{ effective_from: string; day_rule: string }>(
+          'select effective_from, day_rule from pay_schedule order by effective_from',
+        );
+        const rules: PayRule[] = ruleRows.rows.map((r) => ({
+          effectiveFrom: String(r.effective_from).slice(0, 10),
+          dayRule: r.day_rule === 'last' ? 'last' : Number(r.day_rule),
+        }));
+        if (rules.length > 0) {
+          const month = paydayMonthFor(value.occurredOn, rules);
+          await client.query(
+            `insert into pay_overrides (month, paid_on, note)
+             values ($1::date, $2::date, $3)
+             on conflict (month) do update set paid_on = excluded.paid_on, note = excluded.note`,
+            [`${month}-01`, value.occurredOn, 'marked when logging pay'],
+          );
+          // Only the two boundaries this moves are unpinned; the rest stand.
+          await client.query('update budget_months set period_end = null where month = $1::date', [
+            `${month}-01`,
+          ]);
+          await client.query('update budget_months set period_start = null where month = $1::date', [
+            `${shiftMonth(month, 1)}-01`,
+          ]);
+          payday = { month, closes: month, opens: shiftMonth(month, 1) };
+        }
+      }
+
       const row = await client.query(`${SELECT_ENTRY} where e.id = $1`, [inserted.rows[0]!.id]);
-      return { entry: row.rows[0] };
+      return { entry: row.rows[0], payday };
     });
 
     if ('duplicates' in created && created.duplicates) {

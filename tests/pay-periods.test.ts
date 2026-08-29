@@ -7,6 +7,7 @@ import {
 } from '../src/lib/irish-holidays.ts';
 import {
   paydayFor,
+  paydayMonthFor,
   periodContaining,
   periodFor,
   type PayOverride,
@@ -159,4 +160,17 @@ test('spending after an early payday counts against the new period', () => {
   assert.equal(periodContaining('2026-08-31', RULES, PAID_EARLY).month, '2026-09');
   // Without the override those same days sit either side of the 31st.
   assert.equal(periodContaining('2026-08-28', RULES).month, '2026-08');
+});
+
+test('a payday date resolves to the month whose pay it is', () => {
+  // Under the "last day" rule August's pay is due on the 31st.
+  assert.equal(paydayMonthFor('2026-08-28', RULES), '2026-08');
+  assert.equal(paydayMonthFor('2026-08-31', RULES), '2026-08');
+  // Arriving a day late is still August's pay, not September's.
+  assert.equal(paydayMonthFor('2026-09-01', RULES), '2026-08');
+  // Well into September it is September's.
+  assert.equal(paydayMonthFor('2026-09-29', RULES), '2026-09');
+  // Under the 28th rule, before the switch.
+  assert.equal(paydayMonthFor('2026-05-28', RULES), '2026-05');
+  assert.equal(paydayMonthFor('2026-06-26', RULES), '2026-06');
 });

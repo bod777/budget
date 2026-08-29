@@ -135,3 +135,29 @@ export function periodsBetween(
   }
   return periods;
 }
+
+/**
+ * Which month's payday a given date represents.
+ *
+ * Judged by nearness to the scheduled paydays around it, because the calendar
+ * month is not reliable on its own: pay landing on 1 September is August's
+ * arriving a day late, not September's arriving twenty-nine days early.
+ *
+ * Existing overrides are deliberately ignored, so re-recording a payday that
+ * has already been moved still resolves to the same month rather than being
+ * pulled toward wherever it was last put.
+ */
+export function paydayMonthFor(date: string, rules: PayRule[]): string {
+  const month = date.slice(0, 7);
+  let best = month;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const delta of [-1, 0, 1]) {
+    const candidate = shiftMonth(month, delta);
+    const distance = Math.abs(Date.parse(paydayFor(candidate, rules)) - Date.parse(date));
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = candidate;
+    }
+  }
+  return best;
+}
