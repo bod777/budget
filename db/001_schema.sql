@@ -27,8 +27,8 @@ create table if not exists channels (
   archived    boolean not null default false
 );
 
--- Canonical payees/payers. The import folds spelling variants (Flex/Felx Gym,
--- Anthropic/Antrophic) into one row so history aggregates correctly.
+-- Canonical payees/payers. The import folds spelling variants
+-- (Anthropic/Antrophic, Tesco/Tescos) into one row so history aggregates correctly.
 create table if not exists counterparties (
   id          serial primary key,
   name        text not null,

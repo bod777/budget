@@ -29,7 +29,7 @@ create table if not exists accounts (
   archived        boolean not null default false
 );
 
--- Ids are preserved so the 1,794 existing entries keep pointing at the right
+-- Ids are preserved so existing entries keep pointing at the right
 -- account without touching a single row of history.
 insert into accounts (id, name, kind, usable_for, sort_order, archived)
 select
@@ -52,11 +52,6 @@ select setval(
   pg_get_serial_sequence('accounts', 'id'),
   greatest((select coalesce(max(id), 1) from accounts), 1)
 );
-
-insert into accounts (name, kind, opening_balance, opening_on, usable_for, sort_order) values
-  ('Main Savings', 'savings', 5000.00, date '2026-08-15', array['income'], 60),
-  ('Rainy Day Savings',          'savings',   500.00, date '2026-08-15', array['income'], 70)
-on conflict (name) do nothing;
 
 -- Entries ------------------------------------------------------------------
 

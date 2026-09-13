@@ -91,18 +91,24 @@ test('csv handles quoted fields containing commas', () => {
 
 test('payee variants collapse to the canonical spelling', () => {
   const { canonical } = buildCanonicalNames([
-    'Flex Gym',
-    'Flex Gym',
-    'Felx Gym',
+    'Anthropic',
     'Anthropic',
     'Antrophic',
-    'Pat Murphy',
-    'Pat Muprhy',
+    'Costa',
+    'Coasta',
   ]);
-  assert.equal(canonical.get('flex gym'), 'Flex Gym');
-  assert.equal(canonical.get('felx gym'), 'Flex Gym');
+  assert.equal(canonical.get('anthropic'), 'Anthropic');
   assert.equal(canonical.get('antrophic'), 'Anthropic');
+  assert.equal(canonical.get('coasta'), 'Costa');
+});
+
+test('aliases passed in replace the built-in table', () => {
+  // A transposition too short for the fuzzy pass, so only an alias merges it.
+  const aliases = { 'pat muprhy': 'Pat Murphy', 'pat murphy': 'Pat Murphy' };
+  const { canonical } = buildCanonicalNames(['Pat Murphy', 'Pat Muprhy', 'Antrophic'], aliases);
   assert.equal(canonical.get('pat muprhy'), 'Pat Murphy');
+  // The built-in table no longer applies once a different one is given.
+  assert.equal(canonical.get('antrophic'), 'Antrophic');
 });
 
 test('distinct payees are never merged by the fuzzy pass', () => {

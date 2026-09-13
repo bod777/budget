@@ -4,7 +4,8 @@
  * Run:  npm run import -- [--dry-run]
  *
  * Expects data/raw/expenses.csv and data/raw/income.csv, exported from the two
- * response sheets via File > Download > Comma Separated Values.
+ * response sheets via File > Download > Comma Separated Values. Extra payee
+ * spelling variants can go in data/counterparty-aliases.json.
  *
  * The import is deliberately conservative about changing meaning: it merges
  * payee spellings and drops exact duplicate rows, but it never rewrites a
@@ -17,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { pool, withTransaction } from '../src/db.ts';
 import { parseCsvRecords } from './lib/csv.ts';
 import {
+  COUNTERPARTY_ALIASES,
   buildCanonicalNames,
   canonicalNameFor,
   normaliseKey,
@@ -24,6 +26,7 @@ import {
   parseFormDate,
   parseFormTimestamp,
 } from './lib/normalise.ts';
+import { loadCounterpartyAliases } from './lib/private-config.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dryRun = process.argv.includes('--dry-run');
@@ -189,8 +192,10 @@ async function main() {
   ];
   console.log(`staged ${staged.length} rows`);
 
+  const aliases = { ...COUNTERPARTY_ALIASES, ...(await loadCounterpartyAliases()) };
   const { canonical, merges } = buildCanonicalNames(
     staged.map((e) => e.counterparty ?? '').filter(Boolean),
+    aliases,
   );
 
   for (const entry of staged) {

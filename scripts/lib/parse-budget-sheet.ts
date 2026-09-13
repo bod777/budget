@@ -6,7 +6,7 @@
  *   row 3   B starting date   C ending date   D previous surplus
  *   rows 8+ B expense item    D budget        F actual
  *   rows 7+ J income item     K budget        L actual
- *   savings J label ("Savings Savings")  K budget   L actual
+ *   savings J label (e.g. "Savings")  K budget   L actual
  *
  * Only the budgeted figures are taken. Actuals are recomputed from the entries
  * already imported, so a stale total in an old sheet cannot contradict them.

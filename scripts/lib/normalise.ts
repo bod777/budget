@@ -4,7 +4,7 @@
  * The response sheets accumulated three kinds of mess over ~3 years:
  *   - amounts stored inconsistently ("€1,394.77", "1394.77", "30")
  *   - dates as DD/MM/YYYY text
- *   - the same payee spelled several ways (Flex Gym / Felx Gym / "Flex Gym ")
+ *   - the same payee spelled several ways (Anthropic / Antrophic / "Anthropic ")
  *
  * Only the last one is genuinely lossy to leave alone, because it splits a
  * payee's history across several buckets and weakens autocomplete.
@@ -24,22 +24,20 @@ export function normaliseKey(raw: string): string {
  * Spelling variants that normalisation alone will not merge, because they are
  * transpositions or genuinely different words. Keys are normalised forms;
  * values are the canonical display spelling.
+ *
+ * Only public businesses belong here. Variants of people's names, or of places
+ * that would say where someone lives, go in data/counterparty-aliases.json,
+ * which the importer merges over this table.
  */
 export const COUNTERPARTY_ALIASES: Record<string, string> = {
-  'felx gym': 'Flex Gym',
-  'flex gym': 'Flex Gym',
   antrophic: 'Anthropic',
   anthropic: 'Anthropic',
-  'pat muprhy': 'Pat Murphy',
-  'pat murphy': 'Pat Murphy',
   // normaliseKey turns punctuation into a space, so "Conn's Camera" keys as
   // "conn s camera", not "conns camera". Both spacings appear in the data.
   'conn s camera': "Conn's Camera",
   'conn s cameras': "Conn's Camera",
   'conns camera': "Conn's Camera",
   'conns cameras': "Conn's Camera",
-  'corners pharmacy': 'Corners Pharmacy',
-  'corner s pharmacy': 'Corners Pharmacy',
   justeat: 'Just Eat',
   'just eat': 'Just Eat',
   'm s': 'Marks & Spencer',
@@ -48,27 +46,14 @@ export const COUNTERPARTY_ALIASES: Record<string, string> = {
   'marks spencer s': 'Marks & Spencer',
   qpark: 'Q Park',
   'q park': 'Q Park',
-  'maxol station main street': 'Maxol Main Street',
-  'maxol main street': 'Maxol Main Street',
   'google one': 'Google',
   google: 'Google',
-  'riverside s at the quay': "Riverside's At The Quay",
-  'riverside s at the quay': "Riverside's At The Quay",
-  'riverside at the quay': "Riverside's At The Quay",
-  'riversides at the quay': "Riverside's At The Quay",
   'art hobby': 'Art & Hobby',
   'the art hobby shop': 'Art & Hobby',
   'art hobby shop': 'Art & Hobby',
-  'jnae doyle': 'Jane Doyle',
-  'jane doyle': 'Jane Doyle',
-  'tom wlash': 'Tom Walsh',
-  'tom walsh': 'Tom Walsh',
-  'acme insurance': 'Acme Insurance',
-  'acme insurance': 'Acme Insurance',
   // Too short for the fuzzy pass, and a letter insertion rather than a plural.
   coasta: 'Costa',
   costa: 'Costa',
-  'chrisopher': 'Christopher',
 };
 
 /** Parses DD/MM/YYYY (optionally followed by a time) into an ISO date string. */
@@ -180,12 +165,16 @@ function editDistance(a: string, b: string, max: number): number {
 /**
  * Builds the canonical-name map for every counterparty seen in the data.
  *
- * Three passes: the explicit alias table above, then exact match on the
+ * Three passes: the explicit alias table (COUNTERPARTY_ALIASES unless one is
+ * passed in), then exact match on the
  * normalised key, then a conservative fuzzy pass that merges near-identical
  * long names (the sort of thing that comes from a typo on a phone keyboard).
  * The most frequently used spelling wins, so canonical names reflect habit.
  */
-export function buildCanonicalNames(raw: Iterable<string>): CanonicalNames {
+export function buildCanonicalNames(
+  raw: Iterable<string>,
+  aliases: Record<string, string> = COUNTERPARTY_ALIASES,
+): CanonicalNames {
   const counts = new Map<string, { display: Map<string, number>; total: number }>();
 
   for (const value of raw) {
@@ -207,7 +196,7 @@ export function buildCanonicalNames(raw: Iterable<string>): CanonicalNames {
 
   // Pass 1 + 2: explicit aliases, else the most common spelling of that key.
   for (const [key, bucket] of counts) {
-    const alias = COUNTERPARTY_ALIASES[key];
+    const alias = aliases[key];
     if (alias) {
       canonical.set(key, alias);
       continue;
@@ -231,12 +220,12 @@ export function buildCanonicalNames(raw: Iterable<string>): CanonicalNames {
   for (let i = 0; i < keys.length; i++) {
     const target = keys[i]!;
     if (absorbed.has(target)) continue;
-    if (COUNTERPARTY_ALIASES[target]) continue;
+    if (aliases[target]) continue;
 
     for (let j = i + 1; j < keys.length; j++) {
       const candidate = keys[j]!;
       if (absorbed.has(candidate)) continue;
-      if (COUNTERPARTY_ALIASES[candidate]) continue;
+      if (aliases[candidate]) continue;
 
       // Never merge names that differ by a digit -- "Card 1"/"Card 2".
       if (/\d/.test(target) || /\d/.test(candidate)) continue;
@@ -265,7 +254,7 @@ export function buildCanonicalNames(raw: Iterable<string>): CanonicalNames {
 
   // Record explicit-alias merges too, so the report shows the full picture.
   for (const [key, bucket] of counts) {
-    const alias = COUNTERPARTY_ALIASES[key];
+    const alias = aliases[key];
     if (!alias) continue;
     for (const [display, count] of bucket.display) {
       if (display !== alias) merges.push({ from: display, to: alias, count });

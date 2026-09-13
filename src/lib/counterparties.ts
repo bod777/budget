@@ -4,7 +4,7 @@ import { normaliseKey, tidy } from './text.ts';
 /**
  * Resolves a typed payee/payer name to a counterparty id, creating one if the
  * name is genuinely new. Aliases recorded during import (and any added later)
- * win, so re-typing "Felx Gym" still lands on the canonical "Flex Gym".
+ * win, so re-typing "Antrophic" still lands on the canonical "Anthropic".
  */
 export async function resolveCounterparty(
   client: PoolClient,

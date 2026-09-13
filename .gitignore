@@ -18,8 +18,12 @@ gcp-*.json
 !web/package.json
 !web/package-lock.json
 !web/tsconfig.json
-data/raw/*.csv
-data/normalised/
+# Everything under data/ is personal: raw exports, generated reports, and the
+# private config the import and backfill scripts read. See README.
+data/
+
+# Per-project work log, written by a local Claude Code hook.
+.claude/log.md
 *.log
 .DS_Store
 

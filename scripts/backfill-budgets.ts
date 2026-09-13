@@ -8,6 +8,9 @@
  * used for the sheet mirror, so nothing has to be downloaded by hand. The
  * folder must be shared with that account.
  *
+ * The workbooks to read, and which account each savings label in them means,
+ * come from data/budget-workbooks.json (gitignored; see the README).
+ *
  * Only budgeted figures and the opening surplus are taken. Actuals are already
  * derived from imported entries, so a stale total in a three-year-old sheet can
  * never contradict them.
@@ -21,18 +24,10 @@ import { getAccessToken } from '../src/lib/google-service-account.ts';
 import { normaliseKey } from '../src/lib/text.ts';
 import { periodFor, type PayRule } from '../src/lib/pay-periods.ts';
 import { parseBudgetSheet, type ParsedBudget } from './lib/parse-budget-sheet.ts';
-import { BUDGET_WORKBOOKS } from './budget-workbooks.ts';
+import { loadBudgetWorkbooks } from './lib/private-config.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dryRun = process.argv.includes('--dry-run');
-
-/** Savings labels in the sheets, mapped to the accounts they mean. */
-const SAVINGS_ACCOUNTS: Record<string, string> = {
-  'main savings': 'Main Savings',
-  savings: 'Main Savings',
-  'rainy day savings': 'Rainy Day Savings',
-  'rainy day': 'Rainy Day Savings',
-};
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -84,6 +79,12 @@ async function fetchTab(token: string, id: string): Promise<string | null> {
 }
 
 async function main() {
+  const config = await loadBudgetWorkbooks();
+  if (!config || config.workbooks.length === 0) {
+    throw new Error('No workbooks listed: create data/budget-workbooks.json (see the README)');
+  }
+  const { workbooks, savingsAccounts } = config;
+
   const key = env.sheets.serviceAccount;
   if (!key) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is not set');
   const token = await getAccessToken(key);
@@ -110,7 +111,7 @@ async function main() {
   const problems: string[] = [];
   const boundaryNotes: string[] = [];
 
-  for (const workbook of BUDGET_WORKBOOKS) {
+  for (const workbook of workbooks) {
     try {
       const csv = await fetchTab(token, workbook.id);
       if (!csv) {
@@ -152,7 +153,7 @@ async function main() {
     '',
     `Generated ${new Date().toISOString()}`,
     '',
-    `- Workbooks read: **${parsed.length}** of ${BUDGET_WORKBOOKS.length}`,
+    `- Workbooks read: **${parsed.length}** of ${workbooks.length}`,
     `- Range: **${parsed[0]?.month ?? '—'} to ${parsed[parsed.length - 1]?.month ?? '—'}**`,
     '',
     '## Period boundaries',
@@ -187,7 +188,7 @@ async function main() {
         if (!categoryByKey.has(`income|${normaliseKey(label)}`)) unknownLabels.add(`income: ${label}`);
       }
       for (const label of Object.keys(budget.savings)) {
-        if (!SAVINGS_ACCOUNTS[label.toLowerCase()]) unknownLabels.add(`savings: ${label}`);
+        if (!savingsAccounts[label.toLowerCase()]) unknownLabels.add(`savings: ${label}`);
       }
     }
     report.push('## Labels with no match', '', unknownLabels.size
@@ -257,7 +258,7 @@ async function main() {
       }
 
       for (const [label, amount] of Object.entries(budget.savings)) {
-        const accountName = SAVINGS_ACCOUNTS[label.toLowerCase()];
+        const accountName = savingsAccounts[label.toLowerCase()];
         const id = accountName ? accountByKey.get(normaliseKey(accountName)) : undefined;
         if (!id) {
           unknownLabels.add(`savings: ${label}`);

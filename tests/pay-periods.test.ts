@@ -14,7 +14,7 @@ import {
   type PayRule,
 } from '../src/lib/pay-periods.ts';
 
-// The real schedule: Employer A paid on the 28th, Employer B pays on the last day.
+// A schedule that changed with a change of job: the 28th, then the last day.
 const RULES: PayRule[] = [
   { effectiveFrom: '2000-01-01', dayRule: 28 },
   { effectiveFrom: '2026-07-01', dayRule: 'last' },
@@ -57,14 +57,14 @@ test('previousWorkingDay steps back over weekends and holidays', () => {
 });
 
 test('paydays match the ones observed in the spreadsheets', () => {
-  // Employer A, the 28th, moved back when it fell at a weekend.
+  // The first job: the 28th, moved back when it fell at a weekend.
   assert.equal(paydayFor('2026-01', RULES), '2026-01-28'); // Wednesday
   assert.equal(paydayFor('2026-02', RULES), '2026-02-27'); // 28th was a Saturday
   assert.equal(paydayFor('2026-03', RULES), '2026-03-27'); // 28th was a Saturday
   assert.equal(paydayFor('2026-04', RULES), '2026-04-28'); // Tuesday
   assert.equal(paydayFor('2026-05', RULES), '2026-05-28'); // Thursday
   assert.equal(paydayFor('2026-06', RULES), '2026-06-26'); // 28th was a Sunday
-  // Employer B, the last working day of the month.
+  // The second job: the last working day of the month.
   assert.equal(paydayFor('2026-07', RULES), '2026-07-31'); // Friday
   assert.equal(paydayFor('2026-08', RULES), '2026-08-31'); // Monday
 });

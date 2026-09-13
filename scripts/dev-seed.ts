@@ -49,7 +49,7 @@ start.setDate(1);
 // Weekly: gym every Saturday, shop every Friday.
 for (let d = new Date(start); d <= today; d = addDays(d, 1)) {
   if (d.getDay() === 6) {
-    expenses.push([stamp(d), fmt(d), 'Weekly Gym Payment', 'Flex Gym', '49.00', 'Health', 'BOI Credit Card']);
+    expenses.push([stamp(d), fmt(d), 'Weekly Gym Payment', 'The Gym', '49.00', 'Health', 'BOI Credit Card']);
   }
   if (d.getDay() === 5) {
     const shop = rnd() < 0.7 ? 'Aldi' : 'Tesco';
@@ -81,7 +81,7 @@ for (let m = 0; m <= MONTHS_BACK; m++) {
   if (dropout) expenses.push([stamp(dropout), fmt(dropout), 'Dropout Membership', 'YouTube', '4.99', 'Subscriptions', 'BOI Current Account']);
 
   const script = on(7);
-  if (script) expenses.push([stamp(script), fmt(script), 'Monthly Prescription', 'Corners Pharmacy', jitter(45, 0.12), 'Health', 'BOI Credit Card']);
+  if (script) expenses.push([stamp(script), fmt(script), 'Monthly Prescription', 'Pharmacy', jitter(45, 0.12), 'Health', 'BOI Credit Card']);
 
   const bank = on(28);
   if (bank) expenses.push([stamp(bank), fmt(bank), 'Banking Fee', 'BOI', '6.00', 'Banking Fees', 'BOI Current Account']);
@@ -93,7 +93,7 @@ for (let m = 0; m <= MONTHS_BACK; m++) {
   if (insurance) expenses.push([stamp(insurance), fmt(insurance), 'Health Insurance', 'Acme Insurance', '95.00', 'Insurance', 'BOI Current Account']);
 
   const salary = on(28);
-  if (salary) income.push([stamp(salary), fmt(salary), 'Salary for the month', jitter(3000, 0.02), 'Salary', 'BOI Current Account', 'Employer A']);
+  if (salary) income.push([stamp(salary), fmt(salary), 'Salary for the month', jitter(3000, 0.02), 'Salary', 'BOI Current Account', 'Employer']);
 
   // Irregular spending.
   const eatingOut = ['Dinner out', 'Lunch at work', 'Chai Latte', 'Popcorn and Drink', 'Bubba Tea'];
@@ -112,7 +112,7 @@ for (let m = 0; m <= MONTHS_BACK; m++) {
   if (leap) expenses.push([stamp(leap), fmt(leap), 'Leap Card', 'Irish Rail', '20.00', 'Transportation', 'BOI Credit Card']);
 
   const petrol = on(17);
-  if (petrol) expenses.push([stamp(petrol), fmt(petrol), 'Petrol', 'Maxol Main Street', jitter(50, 0.25), 'Transportation', 'BOI Credit Card']);
+  if (petrol) expenses.push([stamp(petrol), fmt(petrol), 'Petrol', 'Maxol', jitter(50, 0.25), 'Transportation', 'BOI Credit Card']);
 
   if (rnd() < 0.5) {
     const payback = on(1 + Math.floor(rnd() * 27));

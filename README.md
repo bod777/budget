@@ -4,13 +4,11 @@ Replacement for the Google Forms + Sheets budget workflow: a mobile-first PWA
 with history-driven autocomplete, a monthly dashboard, and auto-logged
 recurring items.
 
-**Live:** https://<your-app>.up.railway.app
-
 ## Why it exists
 
 Entry was batched, not live — 20 expenses logged in an 18-minute sitting was
 typical, worked out from a bank statement days after the fact. That is where
-the errors came from: `Flex Gym` vs `Felx Gym`, `Anthropic` vs `Antrophic`, the
+the errors came from: `Tesco` vs `Tescos`, `Anthropic` vs `Antrophic`, the
 same brunch payback entered twice, an Aldi shop filed under Eating Out.
 
 So the design goal is not "a nicer form" but **type as little as possible, and
@@ -55,15 +53,16 @@ funds.
 
 Payday is the nominal day moved back to the previous working day when it lands
 on a weekend or an Irish bank holiday. The nominal day is stored in
-`pay_schedule` and has already changed once:
+`pay_schedule`, and can change over time — with a new job, say:
 
-| From | Rule | |
-|---|---|---|
-| 2000-01 | 28th of the month | Employer A |
-| 2026-07 | last day of the month | Employer B |
+| From | Rule |
+|---|---|
+| 2000-01 | 28th of the month |
+| 2026-07 | last day of the month |
 
-So the July 2026 period ran 26 Jun – 30 Jul: the 28th of June was a Sunday, so
-pay landed on Friday the 26th. August ran 31 Jul – 30 Aug.
+With that schedule the July 2026 period ran 26 Jun – 30 Jul: the 28th of June
+was a Sunday, so pay landed on Friday the 26th. August ran 31 Jul – 30 Aug.
+A fresh database starts with a single "last day of the month" rule.
 
 Bank holidays are computed rather than listed (`src/lib/irish-holidays.ts`),
 including Easter and the substitute weekdays taken when a fixed-date holiday
@@ -71,7 +70,7 @@ falls at a weekend — which matters, because a Saturday Christmas pushes a
 bank holiday onto 28 December.
 
 Getting this wrong is not cosmetic: with calendar months the salary paid on
-31 July lands in July, and August shows €120.00 of income instead of €4,000.00.
+31 July lands in July, and August shows almost no income at all.
 
 The schedule is editable in the app under **Settings** (the gear in the top
 bar): add a rule when your pay date changes, and a preview shows the periods it
@@ -84,8 +83,7 @@ do want history to follow the current rules.
 
 ### The surplus chain
 
-Reproduced from the workbook and verified against August 2026, where an
-opening surplus of €300.00 plus €1,700.00 gives €2,000.00:
+Reproduced from the original budget workbook:
 
 ```
 incomeSurplus    = income actual − expense actual
@@ -102,7 +100,7 @@ correcting an old month does not silently rewrite every month after it.
 npm install
 createdb budget_dev
 npm run migrate
-npm run dev-seed && npm run import   # synthetic data shaped like the real thing
+npm run dev-seed && npm run import   # synthetic data, no real history needed
 npm run dev                          # http://localhost:3000
 ```
 
@@ -140,10 +138,52 @@ cat data/import-report.md
 npm run import:prod            # against the live database
 ```
 
+Spelling variants the importer cannot work out on its own — transposed letters
+in a friend's name, say — can be listed in `data/counterparty-aliases.json`:
+
+```json
+{ "pat muprhy": "Pat Murphy", "pat murphy": "Pat Murphy" }
+```
+
+Keys are the lowercased name with punctuation turned into spaces. Only public
+businesses are aliased in code (`scripts/lib/normalise.ts`); anything naming a
+person or place stays in that file.
+
 The importer merges payee spelling variants and drops exact duplicate rows, but
 **never rewrites a category or an amount**. Anything that is a judgement call —
 near-duplicates, unparseable rows — is listed in the report for review rather
 than silently changed.
+
+## Private data
+
+Everything personal stays out of the repository. The ledger itself lives only in
+Postgres, and `data/` is gitignored in full, holding:
+
+| Path | What |
+|---|---|
+| `data/raw/*.csv` | Google Form response exports, input to `npm run import` |
+| `data/counterparty-aliases.json` | Optional extra payee aliases, see above |
+| `data/budget-workbooks.json` | Workbooks for `npm run backfill-budgets`, see below |
+| `data/*-report.md` | Reports the import and backfill write for review |
+
+### Backfilling budgets from old workbooks
+
+`npm run backfill-budgets -- --dry-run` reads monthly budget workbooks through
+the service account described under Google Sheets backup (share the folder with
+it), and takes the budgeted figures and opening surplus from each. List them in
+`data/budget-workbooks.json`:
+
+```json
+{
+  "workbooks": [
+    { "id": "<spreadsheet id>", "title": "2026 Budget - 7 July" }
+  ],
+  "savingsAccounts": { "savings": "Savings Account" }
+}
+```
+
+`title` must end in the month, as above. `savingsAccounts` maps each savings
+label in the sheets (lowercased) to the name of an account in the app.
 
 ## Deployment
 
