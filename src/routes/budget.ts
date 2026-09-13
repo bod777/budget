@@ -10,8 +10,7 @@ import { loadSchedule, type Schedule } from './pay-schedule.ts';
  * lib/pay-periods.ts. The end is exclusive, so the payday that opens a period
  * is counted once, in the period it funds.
  *
- * The surplus chain is taken from the spreadsheet and verified against
- * August 2026, where opening 300.00 + this month 1,700.00 = 2,000.00:
+ * The surplus chain is taken from the original budget spreadsheet:
  *
  *   incomeSurplus     = income actual - expense actual
  *   thisMonthSurplus  = incomeSurplus - savings actual
