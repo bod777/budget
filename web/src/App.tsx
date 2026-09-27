@@ -154,10 +154,16 @@ export function App() {
       .catch(() => setAuthed(false));
   }, []);
 
+  // Categories and accounts change rarely, so the reference is fetched once
+  // rather than on every save, and reloaded on demand when Settings adds to it.
+  const loadReference = useCallback(() => {
+    api.reference().then(setReference).catch(() => setReference(null));
+  }, []);
+
   useEffect(() => {
     if (!authed) return;
-    api.reference().then(setReference).catch(() => setReference(null));
-  }, [authed]);
+    loadReference();
+  }, [authed, loadReference]);
 
   useEffect(() => {
     if (!authed) return;
@@ -211,6 +217,7 @@ export function App() {
             onChanged={refresh}
             reference={reference}
             refreshKey={refreshKey}
+            onReferenceChanged={loadReference}
           />
         )}
 

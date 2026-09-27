@@ -81,6 +81,33 @@ editing the schedule cannot retroactively move a period you have already closed
 off. "Recalculate past periods" in Settings drops those pinned dates when you
 do want history to follow the current rules.
 
+### Accounts
+
+Every account carries a balance, derived from a starting figure plus everything
+logged since, never stored. Accounts are added under **Settings → Accounts and
+balances → Add an account**; nothing is seeded beyond the five the Google Forms
+used, because which banks you hold money with is personal data and stays out of
+the repo.
+
+What an account may be picked for follows from its kind rather than being asked
+about separately:
+
+| Kind | Offered for |
+|---|---|
+| Current, Cash, Other | Expenses, income, transfers |
+| Credit card | Expenses and transfers; its balance reads as what is owed |
+| Savings | Transfers, and income so interest can be logged — never expenses |
+
+Transfers accept any account regardless, since moving money between two of your
+own accounts is neither spending nor earning. Changing an account's kind
+re-derives this, so a current account turned into savings stops being offered as
+somewhere money was spent.
+
+A starting balance is optional, and an account without one reports its balance
+as unknown rather than as zero. **Total saved** is the one figure that needs
+them all: it reads as blank until every savings account has a starting balance,
+rather than quietly understating what you have put away.
+
 ### The surplus chain
 
 Reproduced from the original budget workbook:

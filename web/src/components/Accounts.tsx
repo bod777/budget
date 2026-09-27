@@ -7,9 +7,16 @@ interface Props {
   /** Compact mode drops the editing controls, for showing balances elsewhere. */
   compact?: boolean;
   toast?: (message: string) => void;
+  /**
+   * Called after an account is created, so the entry form's account pickers
+   * pick it up without a reload.
+   */
+  onAccountAdded?: () => void;
 }
 
-const KIND_LABEL: Record<AccountBalance['kind'], string> = {
+type AccountKind = AccountBalance['kind'];
+
+const KIND_LABEL: Record<AccountKind, string> = {
   current: 'Current account',
   credit: 'Credit card',
   cash: 'Cash',
@@ -17,11 +24,41 @@ const KIND_LABEL: Record<AccountBalance['kind'], string> = {
   other: 'Other',
 };
 
-export function Accounts({ reference, refreshKey, compact = false, toast }: Props) {
+const KIND_OPTIONS: AccountKind[] = ['current', 'savings', 'credit', 'cash', 'other'];
+
+/**
+ * What each kind can be picked for, mirroring the rule the server applies. It
+ * is spelled out here only to say so on the form, so adding a savings account
+ * does not look like it has gone missing from the expense picker.
+ */
+const KIND_NOTE: Record<AccountKind, string> = {
+  current: 'Offered for expenses, income and transfers.',
+  savings: 'Offered for transfers in and out, and for income so interest can be logged. Never offered as somewhere you spent.',
+  credit: 'Offered for expenses and transfers. Its balance reads as what you owe.',
+  cash: 'Offered for expenses, income and transfers.',
+  other: 'Offered for expenses, income and transfers.',
+};
+
+const emptyNewAccount = () => ({
+  name: '',
+  kind: 'savings' as AccountKind,
+  balance: '',
+  on: todayIso(),
+});
+
+export function Accounts({
+  reference,
+  refreshKey,
+  compact = false,
+  toast,
+  onAccountAdded,
+}: Props) {
   const [accounts, setAccounts] = useState<AccountBalance[]>([]);
   const [savingsTotal, setSavingsTotal] = useState<number | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState({ balance: '', on: todayIso() });
+  const [adding, setAdding] = useState(false);
+  const [newAccount, setNewAccount] = useState(emptyNewAccount);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,6 +93,44 @@ export function Accounts({ reference, refreshKey, compact = false, toast }: Prop
       toast?.(`${account.name} balance set`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not save');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * A starting balance is optional here: an account opened today starts at
+   * nothing worth typing, and one that already holds money can have its
+   * balance set afterwards like any other.
+   */
+  async function createAccount() {
+    const name = newAccount.name.trim();
+    if (name === '') {
+      setError('Give the account a name');
+      return;
+    }
+    const typedBalance = newAccount.balance.trim();
+    const balance = typedBalance === '' ? null : Number(typedBalance);
+    if (balance !== null && !Number.isFinite(balance)) {
+      setError('Enter a number for the starting balance');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.createAccount({
+        name,
+        kind: newAccount.kind,
+        openingBalance: balance,
+        openingOn: balance === null ? null : newAccount.on,
+      });
+      setNewAccount(emptyNewAccount());
+      setAdding(false);
+      await load();
+      onAccountAdded?.();
+      toast?.(`${name} added`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not add the account');
     } finally {
       setBusy(false);
     }
@@ -203,6 +278,113 @@ export function Accounts({ reference, refreshKey, compact = false, toast }: Prop
           </tbody>
         </table>
       </div>
+
+      {!compact &&
+        (adding ? (
+          <div className="card stack" style={{ marginTop: 12 }}>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label htmlFor="new-account-name">Name</label>
+              <input
+                id="new-account-name"
+                type="text"
+                autoFocus
+                placeholder="e.g. EBS Family Savings Account"
+                value={newAccount.name}
+                onChange={(event) =>
+                  setNewAccount((a) => ({ ...a, name: event.target.value }))
+                }
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label htmlFor="new-account-kind">Kind</label>
+              <select
+                id="new-account-kind"
+                value={newAccount.kind}
+                onChange={(event) =>
+                  setNewAccount((a) => ({ ...a, kind: event.target.value as AccountKind }))
+                }
+              >
+                {KIND_OPTIONS.map((kind) => (
+                  <option key={kind} value={kind}>
+                    {KIND_LABEL[kind]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <p className="small muted" style={{ margin: 0 }}>
+              {KIND_NOTE[newAccount.kind]}
+            </p>
+            <div className="row">
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label htmlFor="new-account-balance">Starting balance</label>
+                <input
+                  id="new-account-balance"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder={newAccount.kind === 'credit' ? '-432.10' : 'optional'}
+                  value={newAccount.balance}
+                  onChange={(event) =>
+                    setNewAccount((a) => ({
+                      ...a,
+                      balance: event.target.value.replace(/[^\d.-]/g, ''),
+                    }))
+                  }
+                />
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label htmlFor="new-account-on">At end of</label>
+                <input
+                  id="new-account-on"
+                  type="date"
+                  value={newAccount.on}
+                  max={todayIso()}
+                  disabled={newAccount.balance.trim() === ''}
+                  onChange={(event) => setNewAccount((a) => ({ ...a, on: event.target.value }))}
+                />
+              </div>
+            </div>
+            <p className="small muted" style={{ margin: 0 }}>
+              Leave the balance blank if the account is new or you would rather look it up later —
+              it will show as not set until you fill it in, never as zero.
+              {newAccount.kind === 'savings' &&
+                ' Total saved needs every savings account to have one, so it will read as blank' +
+                  ' until this account has a balance too.'}
+            </p>
+            <div className="spread">
+              <button
+                type="button"
+                className="btn secondary small"
+                onClick={() => {
+                  setAdding(false);
+                  setNewAccount(emptyNewAccount());
+                  setError(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn small"
+                disabled={busy}
+                onClick={() => void createAccount()}
+              >
+                Add account
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="btn secondary small"
+            style={{ marginTop: 12 }}
+            onClick={() => {
+              setAdding(true);
+              setError(null);
+            }}
+          >
+            Add an account
+          </button>
+        ))}
 
       {error && (
         <div className="banner warn" style={{ marginTop: 12 }}>

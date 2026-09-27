@@ -353,6 +353,16 @@ export const api = {
 
   accounts: () =>
     request<{ accounts: AccountBalance[]; savingsTotal: number | null }>('/api/accounts'),
+  createAccount: (payload: {
+    name: string;
+    kind: Account['kind'];
+    openingBalance?: number | null;
+    openingOn?: string | null;
+  }) =>
+    request<{ id: number }>('/api/accounts', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   updateAccount: (
     id: number,
     payload: { openingBalance?: number | null; openingOn?: string | null; kind?: string; name?: string },

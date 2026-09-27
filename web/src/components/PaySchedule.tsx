@@ -8,6 +8,8 @@ interface Props {
   onChanged: () => void;
   reference: import('../api.ts').Reference;
   refreshKey: number;
+  /** Reloads the account and category lists the entry forms are built from. */
+  onReferenceChanged: () => void;
 }
 
 const DAY_OPTIONS: (number | 'last')[] = ['last', 28, 27, 26, 25, 15, 1];
@@ -68,7 +70,13 @@ function nextMonth(month: string): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
-export function PaySchedule({ toast, onChanged, reference, refreshKey }: Props) {
+export function PaySchedule({
+  toast,
+  onChanged,
+  reference,
+  refreshKey,
+  onReferenceChanged,
+}: Props) {
   const [rules, setRules] = useState<PayRuleRow[]>([]);
   const [overrides, setOverrides] = useState<PayOverrideRow[]>([]);
   const [preview, setPreview] = useState<PreviewPeriod[]>([]);
@@ -197,7 +205,12 @@ export function PaySchedule({ toast, onChanged, reference, refreshKey }: Props) 
   return (
     <div>
       <h2>Accounts and balances</h2>
-      <Accounts reference={reference} refreshKey={refreshKey} toast={toast} />
+      <Accounts
+        reference={reference}
+        refreshKey={refreshKey}
+        toast={toast}
+        onAccountAdded={onReferenceChanged}
+      />
 
       <p className="small muted" style={{ marginTop: 24 }}>
         Budget periods run from one payday to the day before the next. A payday that lands on a
