@@ -145,6 +145,7 @@ export function registerEntryRoutes(app: FastifyInstance) {
       from?: string;
       to?: string;
       categoryId?: string;
+      accountId?: string;
       search?: string;
       limit?: string;
       offset?: string;
@@ -169,9 +170,17 @@ export function registerEntryRoutes(app: FastifyInstance) {
       params.push(request.query.to);
       conditions.push(`e.occurred_on <= $${params.length}::date`);
     }
-    if (request.query.categoryId) {
-      params.push(Number(request.query.categoryId));
+    const categoryId = Number(request.query.categoryId);
+    if (Number.isInteger(categoryId)) {
+      params.push(categoryId);
       conditions.push(`e.category_id = $${params.length}`);
+    }
+    // Either end of a transfer counts as involving the account: money moved
+    // out of Revolut belongs in Revolut's history just as much as money in.
+    const accountId = Number(request.query.accountId);
+    if (Number.isInteger(accountId)) {
+      params.push(accountId);
+      conditions.push(`(e.account_id = $${params.length} or e.to_account_id = $${params.length})`);
     }
     if (request.query.search) {
       params.push(`%${request.query.search.toLowerCase()}%`);
