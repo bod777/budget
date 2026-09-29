@@ -4,6 +4,7 @@ import { resolveCounterparty } from '../lib/counterparties.ts';
 import { tidy } from '../lib/text.ts';
 import {
   CADENCES,
+  anchorForFirstDue,
   dateToTime,
   occurrencesBetween,
   parseIso,
@@ -16,6 +17,8 @@ import {
  * `entries` here: an auto-logged item that never actually got charged would
  * otherwise quietly corrupt the month.
  */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 export async function generatePending(today = toIso(new Date())): Promise<number> {
   const rules = await query<{
     id: number;
@@ -120,6 +123,7 @@ export function registerRecurringRoutes(app: FastifyInstance) {
       toAccountId?: number | null;
       cadence?: string;
       anchorDate?: string;
+      firstDueOn?: string;
     };
   }>('/api/recurring', async (request, reply) => {
     const body = request.body ?? {};
@@ -127,12 +131,23 @@ export function registerRecurringRoutes(app: FastifyInstance) {
       body.kind === 'income' ? 'income' : body.kind === 'transfer' ? 'transfer' : 'expense';
     const description = tidy(body.description ?? '');
     const cadence = CADENCES.includes(body.cadence as Cadence) ? (body.cadence as Cadence) : null;
-    const anchorDate = (body.anchorDate ?? '').trim();
 
     if (description === '') return reply.code(400).send({ error: 'description is required' });
     if (!cadence) return reply.code(400).send({ error: 'cadence is invalid' });
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(anchorDate)) {
-      return reply.code(400).send({ error: 'anchorDate must be YYYY-MM-DD' });
+
+    // Adopting a suggestion knows when the item last happened and sends an
+    // anchor. Setting one up by hand knows when it next goes out instead, so
+    // the anchor is derived from that.
+    const firstDueOn = (body.firstDueOn ?? '').trim();
+    let anchorDate = (body.anchorDate ?? '').trim();
+    if (anchorDate === '' && firstDueOn !== '') {
+      if (!ISO_DATE.test(firstDueOn)) {
+        return reply.code(400).send({ error: 'firstDueOn must be YYYY-MM-DD' });
+      }
+      anchorDate = anchorForFirstDue(cadence, firstDueOn);
+    }
+    if (!ISO_DATE.test(anchorDate)) {
+      return reply.code(400).send({ error: 'anchorDate or firstDueOn is required' });
     }
     if (kind === 'transfer') {
       if (!Number.isInteger(Number(body.accountId)) || !Number.isInteger(Number(body.toAccountId))) {
@@ -301,6 +316,32 @@ export function registerRecurringRoutes(app: FastifyInstance) {
    * Proposes recurring rules by looking for entries that already repeat on a
    * regular cadence, so the fixed items can be set up without typing them out.
    */
+  /**
+   * What a rule would actually do, before it exists. The anchor is exclusive
+   * and month lengths move the day, so the form shows real dates rather than
+   * asking the user to trust a cadence.
+   */
+  app.get<{ Querystring: { cadence?: string; firstDueOn?: string } }>(
+    '/api/recurring/preview',
+    async (request, reply) => {
+      const cadence = CADENCES.includes(request.query.cadence as Cadence)
+        ? (request.query.cadence as Cadence)
+        : null;
+      const firstDueOn = (request.query.firstDueOn ?? '').trim();
+      if (!cadence) return reply.code(400).send({ error: 'cadence is invalid' });
+      if (!ISO_DATE.test(firstDueOn)) {
+        return reply.code(400).send({ error: 'firstDueOn must be YYYY-MM-DD' });
+      }
+
+      const anchorDate = anchorForFirstDue(cadence, firstDueOn);
+      const horizon = toIso(
+        new Date(parseIso(firstDueOn).getTime() + 5 * 366 * 86_400_000),
+      );
+      const dates = occurrencesBetween(cadence, anchorDate, anchorDate, horizon).slice(0, 3);
+      return reply.send({ anchorDate, dates, matchesRequest: dates[0] === firstDueOn });
+    },
+  );
+
   app.get('/api/recurring/suggestions', async (_request, reply) => {
     const rows = await query<{
       description: string;

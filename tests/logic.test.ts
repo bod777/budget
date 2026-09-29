@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { occurrencesBetween } from '../src/lib/recurrence.ts';
+import { anchorForFirstDue, occurrencesBetween } from '../src/lib/recurrence.ts';
 import {
   buildCanonicalNames,
   parseAmount,
@@ -189,4 +189,40 @@ test('trailing whitespace alone does not create a second payee', () => {
   const { canonical } = buildCanonicalNames(['Acme Insurance', 'Acme Insurance ', '48 Mobile ']);
   assert.equal(canonical.get('acme insurance'), 'Acme Insurance');
   assert.equal(canonical.get('48 mobile'), '48 Mobile');
+});
+
+/**
+ * The round trip that matters: an anchor derived from a wanted first date must
+ * actually produce that date, or a standing order set up by hand silently
+ * skips its first payment.
+ */
+function firstDue(cadence: Parameters<typeof occurrencesBetween>[0], wanted: string): string {
+  const anchor = anchorForFirstDue(cadence, wanted);
+  return occurrencesBetween(cadence, anchor, anchor, '2030-01-01')[0]!;
+}
+
+test('an anchor derived from the wanted first date produces that date', () => {
+  assert.equal(firstDue('weekly', '2026-11-05'), '2026-11-05');
+  assert.equal(firstDue('fortnightly', '2026-11-05'), '2026-11-05');
+  assert.equal(firstDue('monthly', '2026-11-01'), '2026-11-01');
+  assert.equal(firstDue('monthly', '2026-11-28'), '2026-11-28');
+  assert.equal(firstDue('yearly', '2026-11-05'), '2026-11-05');
+});
+
+test('stepping back a month crosses the year boundary', () => {
+  assert.equal(anchorForFirstDue('monthly', '2026-01-15'), '2025-12-15');
+  assert.equal(anchorForFirstDue('yearly', '2026-01-15'), '2025-01-15');
+});
+
+test('a monthly anchor clamps to the length of the month it steps back into', () => {
+  // 31 March steps back to 28 February, so the rule then falls due on the
+  // 28th. The form previews the dates because of exactly this.
+  assert.equal(anchorForFirstDue('monthly', '2026-03-31'), '2026-02-28');
+  assert.equal(firstDue('monthly', '2026-03-31'), '2026-03-28');
+  // A leap year has the 29th to land on.
+  assert.equal(anchorForFirstDue('monthly', '2028-03-31'), '2028-02-29');
+});
+
+test('a yearly anchor clamps 29 February back to the 28th', () => {
+  assert.equal(anchorForFirstDue('yearly', '2028-02-29'), '2027-02-28');
 });

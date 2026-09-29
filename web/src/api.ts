@@ -218,10 +218,13 @@ export interface RecurringRule {
   counterpartyId: number | null;
   counterparty: string | null;
   amount: number | null;
-  categoryId: number;
-  category: string;
+  categoryId: number | null;
+  category: string | null;
   accountId: number | null;
   account: string | null;
+  /** Both set only for transfer rules, which carry no category. */
+  toAccountId: number | null;
+  toAccount: string | null;
   cadence: 'weekly' | 'fortnightly' | 'monthly' | 'yearly';
   anchorDate: string;
   active: boolean;
@@ -436,6 +439,10 @@ export const api = {
     request<{ suggestions: RecurringSuggestion[] }>('/api/recurring/suggestions'),
   createRecurring: (payload: Record<string, unknown>) =>
     request<{ id: number }>('/api/recurring', { method: 'POST', body: JSON.stringify(payload) }),
+  recurringPreview: (cadence: string, firstDueOn: string) =>
+    request<{ anchorDate: string; dates: string[]; matchesRequest: boolean }>(
+      `/api/recurring/preview?cadence=${cadence}&firstDueOn=${firstDueOn}`,
+    ),
   updateRecurring: (id: number, payload: Record<string, unknown>) =>
     request<unknown>(`/api/recurring/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteRecurring: (id: number) =>

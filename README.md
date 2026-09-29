@@ -108,6 +108,28 @@ as unknown rather than as zero. **Total saved** is the one figure that needs
 them all: it reads as blank until every savings account has a starting balance,
 rather than quietly understating what you have put away.
 
+### Recurring items
+
+Two ways in. Anything already repeating in the history gets offered on the
+Recurring tab once it has happened four times, and one tap adopts it. Anything
+that has not happened yet -- a standing order you have just set up with the
+bank -- is entered by hand there under **Set one up**, as an expense, income or
+transfer.
+
+Nothing is ever written straight to `entries`. A due rule produces a
+`pending_entries` row to confirm, because an item auto-logged but never
+actually charged would quietly corrupt the month. Leaving the amount blank
+marks it as varying, so it asks instead of prefilling.
+
+Rules are anchored on the occurrence *before* the first one they should
+generate, since adopting a pattern from history means the latest occurrence is
+already recorded and re-logging it would duplicate it. Setting one up by hand
+is the other way round -- what is known is when it next goes out -- so the form
+asks for that and derives the anchor (`anchorForFirstDue`). Because month
+lengths clamp the day, the form previews the actual dates rather than promising
+a cadence: ask for the 31st and it will tell you it is going to fall on the
+28th.
+
 ### The surplus chain
 
 Reproduced from the original budget workbook:

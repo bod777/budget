@@ -98,3 +98,40 @@ export function occurrencesBetween(
   }
   return results;
 }
+
+/**
+ * The anchor that makes a rule first fall due on `firstDueIso`.
+ *
+ * Anchors are exclusive -- see `occurrencesBetween` -- because rules are
+ * normally built from a pattern already in the history, where the anchor is
+ * the most recent occurrence. Setting one up by hand is the other way round:
+ * what is known is when it next goes out, not when it last did. So the form
+ * asks for that and this steps back one period.
+ *
+ * Monthly and yearly clamp to the length of the month they land in, which can
+ * move the recurrence day: stepping back from 31 March gives 28 February, and
+ * a rule anchored on the 28th then falls due on the 28th. That is the same
+ * clamping `occurrencesBetween` already applies going forwards, and it is why
+ * the form previews the dates rather than just promising a cadence.
+ */
+export function anchorForFirstDue(cadence: Cadence, firstDueIso: string): string {
+  const firstDue = parseIso(firstDueIso);
+
+  if (cadence === 'weekly' || cadence === 'fortnightly') {
+    const days = cadence === 'weekly' ? 7 : 14;
+    return toIso(new Date(firstDue.getTime() - days * 86_400_000));
+  }
+
+  const year = firstDue.getUTCFullYear();
+  const month = firstDue.getUTCMonth();
+  const day = firstDue.getUTCDate();
+  const [targetYear, targetMonth] =
+    cadence === 'monthly'
+      ? month === 0
+        ? [year - 1, 11]
+        : [year, month - 1]
+      : [year - 1, month];
+
+  const daysInTarget = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  return toIso(new Date(Date.UTC(targetYear, targetMonth, Math.min(day, daysInTarget))));
+}
