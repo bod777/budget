@@ -121,6 +121,13 @@ closingSurplus   = openingSurplus + thisMonthSurplus
 Opening surplus is stored per month rather than recomputed recursively, so
 correcting an old month does not silently rewrite every month after it.
 
+Savings sit in that chain as a *target* per account per period, edited under
+**Edit budget** on the Budget tab alongside the category budgets. Only the
+target is typed in; what actually went into the account is derived from real
+transfers, so the savings section cannot disagree with the ledger. A period
+with no target of its own inherits the last one set, and editing any figure
+makes it that period's own.
+
 ## Local development
 
 ```sh

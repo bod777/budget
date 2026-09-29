@@ -47,6 +47,9 @@ export function Dashboard({ reference, refreshKey }: Props) {
   const [view, setView] = useState<MonthView | null>(null);
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
+  // Keyed by account id, kept apart from the category drafts above because the
+  // two id spaces overlap and would otherwise collide.
+  const [savingsDrafts, setSavingsDrafts] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
 
   // Land on the period today actually falls in, which after the last payday of
@@ -74,6 +77,9 @@ export function Dashboard({ reference, refreshKey }: Props) {
         setView(result);
         setDrafts(
           Object.fromEntries(result.lines.map((line) => [line.categoryId, String(line.budget)])),
+        );
+        setSavingsDrafts(
+          Object.fromEntries(result.savings.map((line) => [line.accountId, String(line.budget)])),
         );
       })
       .catch(() => setView(null));
@@ -105,9 +111,19 @@ export function Dashboard({ reference, refreshKey }: Props) {
           categoryId: Number(categoryId),
           amount: Number(amount) || 0,
         })),
+        savings: Object.entries(savingsDrafts).map(([accountId, budget]) => ({
+          accountId: Number(accountId),
+          budget: Number(budget) || 0,
+        })),
       });
       const updated = await api.month(month);
       setView(updated);
+      setDrafts(
+        Object.fromEntries(updated.lines.map((line) => [line.categoryId, String(line.budget)])),
+      );
+      setSavingsDrafts(
+        Object.fromEntries(updated.savings.map((line) => [line.accountId, String(line.budget)])),
+      );
       setEditing(false);
     } finally {
       setBusy(false);
@@ -355,7 +371,25 @@ export function Dashboard({ reference, refreshKey }: Props) {
                   return (
                     <tr key={line.accountId}>
                       <td>{line.name}</td>
-                      <td className="num">{money(line.budget)}</td>
+                      <td className="num">
+                        {editing ? (
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            aria-label={`${line.name} target`}
+                            style={{ minHeight: 34, padding: '4px 6px', textAlign: 'right' }}
+                            value={savingsDrafts[line.accountId] ?? ''}
+                            onChange={(event) =>
+                              setSavingsDrafts((current) => ({
+                                ...current,
+                                [line.accountId]: event.target.value.replace(/[^\d.]/g, ''),
+                              }))
+                            }
+                          />
+                        ) : (
+                          money(line.budget)
+                        )}
+                      </td>
                       <td className="num">{money(line.actual)}</td>
                       <td className={`num ${left <= 0 ? 'pos' : 'neg'}`}>{money(left)}</td>
                     </tr>
