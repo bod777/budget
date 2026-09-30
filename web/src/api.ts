@@ -195,6 +195,15 @@ export interface MonthView {
     thisMonthActual: number;
     closingBudget: number;
     closingActual: number;
+    /** Day-to-day accounts only; null if any is missing an opening balance. */
+    liquidNow: number | null;
+    liquidFloor: number;
+    liquidAtPayday: number | null;
+    spendRemaining: number;
+    incomeRemaining: number;
+    savingsRemaining: number;
+    spareNow: number | null;
+    safeToMove: number | null;
   };
 }
 
@@ -374,6 +383,13 @@ export const api = {
   ) =>
     request<{ updated: number }>(`/api/accounts/${id}`, {
       method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+
+  settings: () => request<{ liquidFloor: number }>('/api/settings'),
+  saveSettings: (payload: { liquidFloor: number }) =>
+    request<{ liquidFloor: number }>('/api/settings', {
+      method: 'PUT',
       body: JSON.stringify(payload),
     }),
 

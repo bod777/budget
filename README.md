@@ -130,6 +130,37 @@ lengths clamp the day, the form previews the actual dates rather than promising
 a cadence: ask for the 31st and it will tell you it is going to fall on the
 28th.
 
+### What is spare
+
+The Budget tab leads with what is actually available day to day: every account
+that is not savings, with a credit card's debt counted against it. That figure
+is derived from the same balances the accounts list shows, so the two cannot
+disagree.
+
+Against it sits a **floor** -- what to keep in those accounts rather than sweep
+into savings -- set in Settings and stored in `settings.liquid_floor`. It is
+seeded at zero, because how much someone wants to hold back is personal and
+does not belong in the repository.
+
+Two figures come out of that, and they answer different questions:
+
+```
+spare now  = available − floor
+at payday  = available − budget not yet spent
+                       + income not yet received
+                       − savings budgeted but not yet moved
+safe to move = at payday − floor
+```
+
+`spare now` is what is unclaimed this second. `safe to move` is what is still
+unclaimed once the rest of the period is paid for, which is the one to act on:
+moving the first and then meeting the rent lands you under the floor. Savings
+already budgeted are subtracted because that money is spoken for, and offering
+it twice would be the same mistake in a different place.
+
+Both read as `—` when any day-to-day account is missing an opening balance. A
+total that quietly leaves an account out still looks like a total.
+
 ### The surplus chain
 
 Reproduced from the original budget workbook:

@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { query, withTransaction } from '../db.ts';
+import { liquidTotal, loadAccountBalances } from '../balances.ts';
+import { readSetting } from '../settings.ts';
 import { periodContaining, periodFor, shiftMonth, type Period } from '../lib/pay-periods.ts';
 import { loadSchedule, type Schedule } from './pay-schedule.ts';
 
@@ -221,6 +223,32 @@ export function registerBudgetRoutes(app: FastifyInstance) {
     const thisMonthBudget = Math.round((incomeSurplusBudget - savingsBudget) * 100) / 100;
     const thisMonthActual = Math.round((incomeSurplusActual - savingsActual) * 100) / 100;
 
+    /**
+     * What is in the day-to-day accounts, and what could go to savings without
+     * dropping below the floor by payday.
+     *
+     * The projection subtracts budget not yet spent and adds income not yet
+     * received, so it answers "what is spare once the rest of the period is
+     * paid for" rather than "what is spare this second". Savings already
+     * budgeted but not yet moved are subtracted too: that money is spoken for,
+     * and counting it as sweepable would offer it twice.
+     *
+     * Both figures are null when any day-to-day account is missing an opening
+     * balance, because a total that quietly omits one still reads as a total.
+     */
+    const liquidNow = liquidTotal(await loadAccountBalances());
+    const liquidFloor = Number(await readSetting('liquid_floor', '0')) || 0;
+    const clampUp = (value: number) => Math.max(Math.round(value * 100) / 100, 0);
+    const spendRemaining = clampUp(expenseBudget - expenseActual);
+    const incomeRemaining = clampUp(incomeBudget - incomeActual);
+    const savingsRemaining = clampUp(savingsBudget - savingsActual);
+    const liquidAtPayday =
+      liquidNow === null
+        ? null
+        : Math.round(
+            (liquidNow - spendRemaining + incomeRemaining - savingsRemaining) * 100,
+          ) / 100;
+
     return reply.send({
       month,
       exists: monthRow.length > 0,
@@ -247,6 +275,17 @@ export function registerBudgetRoutes(app: FastifyInstance) {
         thisMonthActual,
         closingBudget: Math.round((openingSurplus + thisMonthBudget) * 100) / 100,
         closingActual: Math.round((openingSurplus + thisMonthActual) * 100) / 100,
+        liquidNow,
+        liquidFloor,
+        liquidAtPayday,
+        spendRemaining,
+        incomeRemaining,
+        savingsRemaining,
+        spareNow: liquidNow === null ? null : Math.round((liquidNow - liquidFloor) * 100) / 100,
+        safeToMove:
+          liquidAtPayday === null
+            ? null
+            : Math.round((liquidAtPayday - liquidFloor) * 100) / 100,
       },
     });
   });

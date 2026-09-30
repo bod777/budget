@@ -77,6 +77,32 @@ export function PaySchedule({
   refreshKey,
   onReferenceChanged,
 }: Props) {
+  const [floor, setFloor] = useState('');
+  const [floorSaved, setFloorSaved] = useState('');
+
+  useEffect(() => {
+    api
+      .settings()
+      .then((s) => {
+        setFloor(String(s.liquidFloor));
+        setFloorSaved(String(s.liquidFloor));
+      })
+      .catch(() => {});
+  }, [refreshKey]);
+
+  async function saveFloor() {
+    const value = Number(floor);
+    if (!Number.isFinite(value) || value < 0) {
+      toast('Enter zero or more');
+      return;
+    }
+    const result = await api.saveSettings({ liquidFloor: value });
+    setFloor(String(result.liquidFloor));
+    setFloorSaved(String(result.liquidFloor));
+    onChanged();
+    toast('Floor saved');
+  }
+
   const [rules, setRules] = useState<PayRuleRow[]>([]);
   const [overrides, setOverrides] = useState<PayOverrideRow[]>([]);
   const [preview, setPreview] = useState<PreviewPeriod[]>([]);
@@ -211,6 +237,38 @@ export function PaySchedule({
         toast={toast}
         onAccountAdded={onReferenceChanged}
       />
+
+      <h2 style={{ marginTop: 24 }}>Keep in the current accounts</h2>
+      <div className="card stack">
+        <div className="row">
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label htmlFor="liquid-floor">Floor</label>
+            <input
+              id="liquid-floor"
+              type="text"
+              inputMode="decimal"
+              placeholder="0.00"
+              value={floor}
+              onChange={(event) => setFloor(event.target.value.replace(/[^\d.]/g, ''))}
+            />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+            <button
+              type="button"
+              className="btn small"
+              disabled={floor === floorSaved}
+              onClick={() => void saveFloor()}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+        <p className="small muted" style={{ margin: 0 }}>
+          What to hold back in the day-to-day accounts rather than sweep into savings. The Budget
+          tab works out what is spare above it, both right now and once the rest of the period is
+          paid for. Zero means no floor.
+        </p>
+      </div>
 
       <p className="small muted" style={{ marginTop: 24 }}>
         Budget periods run from one payday to the day before the next. A payday that lands on a

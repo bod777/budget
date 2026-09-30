@@ -159,6 +159,32 @@ export function Dashboard({ reference, refreshKey }: Props) {
 
       <div className="stat-grid">
         <div className="stat">
+          <div className="label">Available</div>
+          <div
+            className={`value money ${
+              totals.liquidNow === null ? '' : totals.liquidNow >= 0 ? 'pos' : 'neg'
+            }`}
+          >
+            {totals.liquidNow === null ? '—' : money(totals.liquidNow)}
+          </div>
+          <div className="small muted">
+            {totals.liquidNow === null
+              ? 'an account needs a starting balance'
+              : 'day-to-day accounts, less card debt'}
+          </div>
+        </div>
+        <div className="stat">
+          <div className="label">Saved</div>
+          <div className={`value money ${totals.savingsActual > 0 ? 'pos' : ''}`}>
+            {money(totals.savingsActual)}
+          </div>
+          <div className="small muted">
+            {totals.savingsBudget > 0
+              ? `of ${money(totals.savingsBudget)} planned`
+              : 'moved this period'}
+          </div>
+        </div>
+        <div className="stat">
           <div className="label">Spent</div>
           <div className="value money">{money(totals.expenseActual)}</div>
           {hasBudget && (
@@ -169,28 +195,47 @@ export function Dashboard({ reference, refreshKey }: Props) {
           )}
         </div>
         <div className="stat">
-          <div className="label">Received</div>
-          <div className="value money">{money(totals.incomeActual)}</div>
-          {hasBudget && (
-            <div className={`small ${totals.incomeDifference >= 0 ? 'pos' : 'neg'}`}>
-              {totals.incomeDifference >= 0 ? '+' : ''}
-              {money(totals.incomeDifference)} vs plan
-            </div>
-          )}
-        </div>
-        <div className="stat">
-          <div className="label">This month</div>
-          <div className={`value money ${totals.thisMonthActual >= 0 ? 'pos' : 'neg'}`}>
-            {money(totals.thisMonthActual)}
-          </div>
-          <div className="small muted">after savings</div>
-        </div>
-        <div className="stat">
           <div className="label">Closing surplus</div>
           <div className={`value money ${totals.closingActual >= 0 ? 'pos' : 'neg'}`}>
             {money(totals.closingActual)}
           </div>
           <div className="small muted">opened at {money(view.openingSurplus)}</div>
+        </div>
+        {/*
+          Two figures, not one, because they answer different questions: what is
+          spare this second, and what is still spare once the rest of the period
+          is paid for. Moving the first and then meeting the rent leaves you
+          under the floor, which is the mistake the second one prevents.
+        */}
+        <div className="stat" style={{ gridColumn: '1 / -1' }}>
+          <div className="spread">
+            <div>
+              <div className="label">Safe to move</div>
+              <div
+                className={`value money ${
+                  totals.safeToMove === null ? '' : totals.safeToMove > 0 ? 'pos' : 'neg'
+                }`}
+              >
+                {totals.safeToMove === null ? '—' : money(totals.safeToMove)}
+              </div>
+            </div>
+            <div className="small muted" style={{ textAlign: 'right' }}>
+              {totals.safeToMove === null ? (
+                <div>needs every day-to-day balance set</div>
+              ) : (
+                <>
+                  <div>
+                    {totals.spareNow !== null && `${money(totals.spareNow)} spare right now`}
+                  </div>
+                  <div>
+                    {totals.liquidFloor > 0
+                      ? `keeps ${money(totals.liquidFloor)} at payday`
+                      : 'no floor set — set one in Settings'}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 

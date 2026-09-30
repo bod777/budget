@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { query } from '../db.ts';
+import { loadAccountBalances } from '../balances.ts';
 import { tidy } from '../lib/text.ts';
 
 /**
@@ -37,99 +38,15 @@ function usableForKind(kind: string): string[] {
   }
 }
 
-/**
- * An opening balance is the *closing* balance of the day it is dated, the way a
- * bank statement reads. Only entries after that date move it.
- *
- * The alternative -- counting the opening day itself -- double-counts anything
- * already logged for that day, because the figure read off a banking app
- * naturally includes the day's activity so far.
- *
- * An account with no opening balance has an unknown balance, reported as
- * unknown rather than silently as zero.
- */
-const BALANCE_SQL = `
-  with movements as (
-    select
-      e.account_id as account_id,
-      e.occurred_on,
-      case e.kind
-        when 'income' then e.amount
-        when 'expense' then -e.amount
-        when 'transfer' then -e.amount
-      end as delta
-    from entries e
-    where e.account_id is not null
-    union all
-    -- The receiving end of a transfer.
-    select e.to_account_id, e.occurred_on, e.amount
-    from entries e
-    where e.kind = 'transfer' and e.to_account_id is not null
-  )
-  select
-    a.id,
-    a.name,
-    a.kind,
-    a.usable_for as "usableFor",
-    a.opening_balance as "openingBalance",
-    a.opening_on as "openingOn",
-    a.sort_order as "sortOrder",
-    a.archived,
-    coalesce(sum(m.delta), 0) as movement,
-    count(m.*)::int as "movementCount",
-    -- When the figure last actually moved, which is what the balance is
-    -- current as of. The opening date only says when it was last anchored.
-    max(m.occurred_on) as "lastMovementOn"
-  from accounts a
-  left join movements m
-    on m.account_id = a.id
-   and (a.opening_on is null or m.occurred_on > a.opening_on)
-  group by a.id
-  order by a.sort_order, a.name
-`;
-
-interface BalanceRow {
-  id: number;
-  name: string;
-  kind: string;
-  usableFor: string[];
-  openingBalance: number | null;
-  openingOn: string | null;
-  sortOrder: number;
-  archived: boolean;
-  movement: number;
-  movementCount: number;
-  lastMovementOn: string | null;
-}
-
 export function registerAccountRoutes(app: FastifyInstance) {
   app.get('/api/accounts', async (_request, reply) => {
-    const rows = await query<BalanceRow>(BALANCE_SQL);
-
-    const accounts = rows.map((row) => {
-      const known = row.openingBalance !== null;
-      const balance = known
-        ? Math.round((Number(row.openingBalance) + Number(row.movement)) * 100) / 100
-        : null;
-      return {
-        id: row.id,
-        name: row.name,
-        kind: row.kind,
-        usableFor: row.usableFor,
-        openingBalance: row.openingBalance === null ? null : Number(row.openingBalance),
-        openingOn: row.openingOn ? String(row.openingOn).slice(0, 10) : null,
-        sortOrder: row.sortOrder,
-        archived: row.archived,
-        movement: Math.round(Number(row.movement) * 100) / 100,
-        movementCount: row.movementCount,
-        lastMovementOn: row.lastMovementOn ? String(row.lastMovementOn).slice(0, 10) : null,
-        balance,
-        // A credit card's balance is what is owed, so it reads more naturally
-        // with the sign flipped in the interface.
-        owed: row.kind === 'credit' && balance !== null ? -balance : null,
-        needsOpeningBalance: !known,
-      };
-    });
+    const accounts = (await loadAccountBalances()).map((account) => ({
+      ...account,
+      // A credit card's balance is what is owed, so it reads more naturally
+      // with the sign flipped in the interface.
+      owed: account.kind === 'credit' && account.balance !== null ? -account.balance : null,
+      needsOpeningBalance: account.openingBalance === null,
+    }));
 
     const savings = accounts.filter((a) => a.kind === 'savings' && !a.archived);
     const savingsTotal = savings.every((a) => a.balance !== null)

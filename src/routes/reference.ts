@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { query } from '../db.ts';
 import { env } from '../env.ts';
+import { readSetting, writeSetting } from '../settings.ts';
 
 export function registerReferenceRoutes(app: FastifyInstance) {
   app.get('/api/reference', async (_request, reply) => {
@@ -22,6 +23,19 @@ export function registerReferenceRoutes(app: FastifyInstance) {
       currency: env.currency,
       locale: env.locale,
     });
+  });
+
+  app.get('/api/settings', async (_request, reply) => {
+    return reply.send({ liquidFloor: Number(await readSetting('liquid_floor', '0')) || 0 });
+  });
+
+  app.put<{ Body: { liquidFloor?: number } }>('/api/settings', async (request, reply) => {
+    const floor = Number(request.body?.liquidFloor);
+    if (!Number.isFinite(floor) || floor < 0) {
+      return reply.code(400).send({ error: 'liquidFloor must be zero or more' });
+    }
+    await writeSetting('liquid_floor', String(Math.round(floor * 100) / 100));
+    return reply.send({ liquidFloor: Math.round(floor * 100) / 100 });
   });
 
   app.get('/api/health', async (_request, reply) => {
