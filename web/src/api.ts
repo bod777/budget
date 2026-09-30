@@ -24,6 +24,8 @@ export interface AccountBalance extends Account {
   archived: boolean;
   movement: number;
   movementCount: number;
+  /** The most recent date anything moved this account; null if nothing has. */
+  lastMovementOn: string | null;
   /** Null when no opening balance has been set. */
   balance: number | null;
   /** For credit cards: the balance expressed as what is owed. */

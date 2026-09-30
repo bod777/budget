@@ -76,7 +76,10 @@ const BALANCE_SQL = `
     a.sort_order as "sortOrder",
     a.archived,
     coalesce(sum(m.delta), 0) as movement,
-    count(m.*)::int as "movementCount"
+    count(m.*)::int as "movementCount",
+    -- When the figure last actually moved, which is what the balance is
+    -- current as of. The opening date only says when it was last anchored.
+    max(m.occurred_on) as "lastMovementOn"
   from accounts a
   left join movements m
     on m.account_id = a.id
@@ -96,6 +99,7 @@ interface BalanceRow {
   archived: boolean;
   movement: number;
   movementCount: number;
+  lastMovementOn: string | null;
 }
 
 export function registerAccountRoutes(app: FastifyInstance) {
@@ -118,6 +122,7 @@ export function registerAccountRoutes(app: FastifyInstance) {
         archived: row.archived,
         movement: Math.round(Number(row.movement) * 100) / 100,
         movementCount: row.movementCount,
+        lastMovementOn: row.lastMovementOn ? String(row.lastMovementOn).slice(0, 10) : null,
         balance,
         // A credit card's balance is what is owed, so it reads more naturally
         // with the sign flipped in the interface.

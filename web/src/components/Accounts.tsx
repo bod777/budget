@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, formatMoney, todayIso, type AccountBalance, type Reference } from '../api.ts';
+import {
+  api,
+  formatDayLabel,
+  formatMoney,
+  todayIso,
+  type AccountBalance,
+  type Reference,
+} from '../api.ts';
 
 interface Props {
   reference: Reference;
@@ -171,7 +178,17 @@ export function Accounts({
                   <span className="cat-name">{account.name}</span>
                   <div className="small muted">
                     {KIND_LABEL[account.kind]}
-                    {account.openingOn ? ` · balance at end of ${account.openingOn}` : ''}
+                    {/*
+                      The balance shown is the one as of right now, so the date
+                      beside it is when it last actually moved. The opening date
+                      only says when it was last anchored, which is a different
+                      question and belongs in the editor, not here.
+                    */}
+                    {account.lastMovementOn
+                      ? ` · last changed ${formatDayLabel(account.lastMovementOn)}`
+                      : account.openingOn
+                        ? ` · nothing logged since ${formatDayLabel(account.openingOn)}`
+                        : ''}
                   </div>
                   {!compact && editing === account.id && (
                     <div className="stack" style={{ marginTop: 8 }}>
